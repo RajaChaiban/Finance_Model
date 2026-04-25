@@ -13,6 +13,8 @@ from src.config.loader import load_config
 from src.engines import router
 from src.data import market_data
 from src.report import generator
+from src.analysis.structurer_agent import StructurerReview
+from src.analysis.structurer_report import generate_structurer_report
 
 
 def main():
@@ -41,6 +43,11 @@ Examples:
         "--no-report",
         action="store_true",
         help="Skip report generation, just print results to console"
+    )
+    parser.add_argument(
+        "--no-structurer-review",
+        action="store_true",
+        help="Skip structurer financial analyst review"
     )
 
     args = parser.parse_args()
@@ -123,9 +130,28 @@ Examples:
             print(f"\nGenerating HTML report...")
             report_path = generator.generate_report(results, config)
             print(f"  Report saved: {report_path}")
-            print(f"\nOpen the report in your browser to view detailed analysis and charts.")
         else:
             print(f"\nSkipping report generation (--no-report flag used).")
+
+        # Generate structurer review
+        if not args.no_structurer_review:
+            print(f"\nRunning Structurer Financial Analyst Review...")
+            structurer = StructurerReview()
+            opinion = structurer.analyze(results, config)
+
+            print(f"\nStructurer Recommendation: {opinion.recommendation.replace('_', ' ')}")
+            print(f"  Fair Value: ${opinion.fair_value:.4f}")
+            if opinion.market_mid:
+                print(f"  Market Mid: ${opinion.market_mid:.2f}")
+                print(f"  Edge: {opinion.edge_pct:+.2f}%")
+            print(f"  Risk Score: {opinion.risk_score}/10")
+            print(f"  Probability of Profit: {opinion.probability_of_profit:.1f}%")
+            print(f"\n  Action: {opinion.recommended_action}")
+
+            review_path = generate_structurer_report(opinion, config, config.save_to)
+            print(f"\n  Structurer Review saved: {review_path}")
+        else:
+            print(f"\nSkipping structurer review (--no-structurer-review flag used).")
 
         print(f"\n[OK] Pricing pipeline complete!")
 
