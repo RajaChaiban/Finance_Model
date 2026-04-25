@@ -40,6 +40,7 @@ Thumbs.db
 # Local explanation/reference files (not synced to remote)
 SETUP.md
 SUMMARY.md
+raja_notes/
 
 # CRITICAL: Prevent any cross-project contamination
 # Only files in THIS directory should be tracked

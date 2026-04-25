@@ -5,3 +5,4 @@ matplotlib>=3.4.0
 pyyaml>=5.4.0
 jinja2>=3.0.0
 yfinance>=0.2.0
+QuantLib>=1.42.0

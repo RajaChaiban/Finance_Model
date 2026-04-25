@@ -1,0 +1,21 @@
+# Solver test: Find strike that costs exactly $5
+# Question: "What strike price makes this American put cost $5.00?"
+
+option:
+  type: american_put
+  underlying: TEST_SOLVER
+  spot_price: 100.0
+  strike_price: 100.0  # Starting guess (will be overridden by solver)
+  days_to_expiration: 90
+  risk_free_rate: 0.05
+  volatility: 0.20
+  dividend_yield: 0.02
+
+pricing:
+  n_paths: 10000
+  n_steps: 90
+  variance_reduction: none
+
+output:
+  report_format: html
+  save_to: ./reports/

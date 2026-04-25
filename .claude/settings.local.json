@@ -13,7 +13,13 @@
       "Bash(python ko_analysis.py)",
       "Bash(python \"C:\\\\Users\\\\rajac\\\\OneDrive\\\\Desktop\\\\Python\\\\Finance_Model\\\\ko_analysis.py\")",
       "Bash(tee analysis_output.txt)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(xargs grep *)",
+      "Bash(grep -E \"\\\\.py$|\\\\.md$\")",
+      "Bash(pip show *)",
+      "PowerShell(python -c \"import QuantLib as ql; print\\(f'QuantLib {ql.QUANTLIB_VERSION} imported successfully!'\\)\")",
+      "Bash(grep -E \"\\\\.html$\")",
+      "Bash(grep -E \"\\\\.\\(py|yaml\\)$\")"
     ]
   }
 }
