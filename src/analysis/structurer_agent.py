@@ -1,9 +1,13 @@
 """Structurer Financial Analyst Review Agent - Senior VP perspective on pricing results."""
 
+import logging
+import time
 import numpy as np
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -113,34 +117,121 @@ class StructurerReview:
             detailed_analysis=analysis,
         )
 
-    def _fetch_market_prices(self, ticker: str, strike: float, days: int) -> Tuple[Optional[float], Optional[float], Optional[float]]:
-        """Fetch bid/ask prices from Yahoo Finance.
+    def _fetch_market_prices(
+        self,
+        ticker: str,
+        strike: float,
+        days: int,
+        max_retries: int = 3
+    ) -> Tuple[Optional[float], Optional[float], Optional[float]]:
+        """Fetch bid/ask prices from Yahoo Finance with retry logic.
+
+        Args:
+            ticker: Stock ticker symbol
+            strike: Strike price to find in option chain
+            days: Days to expiration (used to find closest expiration)
+            max_retries: Number of retry attempts
 
         Returns:
-            (bid, mid, ask) or (None, None, None) if fetch fails
+            (bid, mid, ask) or (None, None, None) if fetch fails after retries
         """
         try:
             import yfinance as yf
-            stock = yf.Ticker(ticker)
+        except ImportError:
+            logger.warning("yfinance not installed. Cannot fetch market prices.")
+            return None, None, None
 
-            # Get option chain
-            exp_date = stock.options[0]  # First available expiration
-            chain = stock.option_chain(exp_date)
+        for attempt in range(max_retries):
+            try:
+                logger.info(
+                    f"Fetching market prices for {ticker} strike={strike:.2f}: "
+                    f"attempt {attempt + 1}/{max_retries}"
+                )
 
-            # Find closest strike in puts
-            puts = chain.puts
-            closest_put = puts.iloc[(puts["strike"] - strike).abs().argsort()[:1]]
+                stock = yf.Ticker(ticker)
 
-            if not closest_put.empty:
+                # Get available expiration dates
+                if not hasattr(stock, 'options') or not stock.options:
+                    logger.warning(f"No options available for {ticker}")
+                    return None, None, None
+
+                # Find closest expiration to requested days
+                exp_dates = stock.options
+                target_days = days
+                closest_exp = min(
+                    exp_dates,
+                    key=lambda x: abs(self._days_to_expiration(x) - target_days)
+                )
+                logger.debug(f"Selected expiration: {closest_exp} (target: {days} days)")
+
+                # Get option chain
+                chain = stock.option_chain(closest_exp)
+                puts = chain.puts
+
+                if puts.empty:
+                    logger.warning(f"No put options available for {ticker} on {closest_exp}")
+                    return None, None, None
+
+                # Find closest strike
+                closest_put = puts.iloc[(puts["strike"] - strike).abs().argsort()[:1]]
+
+                if closest_put.empty:
+                    logger.warning(f"Could not find close strike for {ticker}")
+                    return None, None, None
+
                 bid = closest_put["bid"].values[0]
                 ask = closest_put["ask"].values[0]
+
+                # Filter out zero/invalid prices
+                if bid <= 0 or ask <= 0 or ask < bid:
+                    logger.warning(
+                        f"Invalid bid/ask for {ticker}: bid={bid}, ask={ask}. "
+                        f"Retrying..."
+                    )
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
+                    continue
+
                 mid = (bid + ask) / 2
+                logger.info(
+                    f"Successfully fetched market prices for {ticker}: "
+                    f"bid={bid:.4f}, ask={ask:.4f}, mid={mid:.4f}"
+                )
                 return float(bid), float(mid), float(ask)
 
-        except Exception:
-            pass
+            except Exception as e:
+                wait_time = 2 ** attempt
+                if attempt < max_retries - 1:
+                    logger.warning(
+                        f"Failed to fetch market prices for {ticker} (attempt {attempt + 1}): {e}. "
+                        f"Retrying in {wait_time}s..."
+                    )
+                    time.sleep(wait_time)
+                else:
+                    logger.error(
+                        f"Failed to fetch market prices for {ticker} after {max_retries} attempts. "
+                        f"Using None fallback."
+                    )
 
         return None, None, None
+
+    def _days_to_expiration(self, exp_date_str: str) -> int:
+        """Calculate days to expiration from date string.
+
+        Args:
+            exp_date_str: Date string in format YYYY-MM-DD
+
+        Returns:
+            Number of days to expiration (0 if already expired or parsing error)
+        """
+        try:
+            from datetime import datetime
+            exp_date = datetime.strptime(exp_date_str, "%Y-%m-%d")
+            today = datetime.now()
+            days = (exp_date - today).days
+            return max(0, days)  # Return 0 if already expired
+        except Exception:
+            return 0
 
     def _calculate_edge(self, model_price: float, market_mid: Optional[float],
                        market_bid: Optional[float], market_ask: Optional[float]) -> float:

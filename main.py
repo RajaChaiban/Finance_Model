@@ -6,6 +6,7 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from src.data import market_data
 from src.report import generator
 from src.analysis.structurer_agent import StructurerReview
 from src.analysis.structurer_report import generate_structurer_report
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 
 def main():
@@ -77,17 +85,41 @@ Examples:
 
         # Fetch market data if requested
         if args.fetch_market_data:
-            print(f"\nFetching market data for {config.underlying}...")
-            market_params = market_data.fetch_market_params(config.underlying)
+            logger.info(f"Fetching live market data for {config.underlying}...")
+            market_params = market_data.fetch_market_params(
+                config.underlying,
+                max_retries=3,
+                timeout=10
+            )
+
+            source = market_params.get("source", "fallback")
+            if source == "cache":
+                logger.info(f"Using cached market data for {config.underlying}")
+            elif source == "api":
+                logger.info(f"Successfully fetched live market data for {config.underlying}")
+            else:
+                logger.warning(
+                    f"Could not fetch live market data for {config.underlying}, "
+                    f"using config values"
+                )
+
             if market_params["spot_price"]:
                 pricing_params["S"] = market_params["spot_price"]
-                print(f"  Spot Price: ${market_params['spot_price']:.2f}")
+                logger.info(f"  Spot Price: ${market_params['spot_price']:.2f}")
+            else:
+                logger.info(f"  Spot Price: ${config.spot_price:.2f} (from config)")
+
             if market_params["volatility_90d"]:
                 pricing_params["sigma"] = market_params["volatility_90d"]
-                print(f"  Volatility (90d): {market_params['volatility_90d']:.2%}")
+                logger.info(f"  Volatility (90d): {market_params['volatility_90d']:.2%}")
+            else:
+                logger.info(f"  Volatility: {config.volatility:.2%} (from config)")
+
             if market_params["dividend_yield"]:
                 pricing_params["q"] = market_params["dividend_yield"]
-                print(f"  Dividend Yield: {market_params['dividend_yield']:.2%}")
+                logger.info(f"  Dividend Yield: {market_params['dividend_yield']:.2%}")
+            else:
+                logger.info(f"  Dividend Yield: {config.dividend_yield:.2%} (from config)")
 
         # Route to appropriate pricing engine
         print(f"\nRouting to pricing engine...")
