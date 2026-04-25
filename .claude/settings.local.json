@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(scripts/start-server.sh --project-dir \"C:\\\\Users\\\\rajac\\\\OneDrive\\\\Desktop\\\\Python\\\\Finance_Model\")",
+      "Bash(tee /tmp/server-start.log)",
+      "Bash(\"C:\\\\Users\\\\rajac\\\\.claude\\\\plugins\\\\cache\\\\claude-plugins-official\\\\superpowers\\\\5.0.7\\\\skills\\\\brainstorming\\\\scripts\\\\start-server.sh\" --project-dir \"C:\\\\Users\\\\rajac\\\\OneDrive\\\\Desktop\\\\Python\\\\Finance_Model\")",
+      "Bash(python3 *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"import json; nb = json.load\\(open\\('Knockout_Option_Pricer_SP500.ipynb'\\)\\); print\\(f'Total cells: {len\\(nb[\\\\\"cells\\\\\"]\\)}'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python)",
+      "Bash(python -m jupyter nbconvert --to notebook --execute Knockout_Option_Pricer_SP500.ipynb --output Knockout_Option_Pricer_SP500_executed.ipynb)",
+      "Bash(python ko_analysis.py)",
+      "Bash(python \"C:\\\\Users\\\\rajac\\\\OneDrive\\\\Desktop\\\\Python\\\\Finance_Model\\\\ko_analysis.py\")",
+      "Bash(tee analysis_output.txt)",
+      "Bash(python *)"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\rajac\OneDrive\Desktop\Python\Finance_Model\ko_analysis.py", line 4, in <module>
+    import yfinance as yf
+ModuleNotFoundError: No module named 'yfinance'

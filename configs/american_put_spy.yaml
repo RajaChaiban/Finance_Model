@@ -1,0 +1,18 @@
+option:
+  type: american_put
+  underlying: SPY
+  spot_price: 5415.23
+  strike_price: 5400
+  days_to_expiration: 90
+  risk_free_rate: 0.045
+  volatility: 0.1845
+  dividend_yield: 0.015
+
+pricing:
+  n_paths: 10000
+  n_steps: 90
+  variance_reduction: antithetic
+
+output:
+  report_format: html
+  save_to: ./reports/
