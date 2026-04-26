@@ -118,14 +118,15 @@ def fetch_market_params(
                 params["spot_price"] = float(hist["Close"].iloc[-1])
                 logger.debug(f"Fetched spot price: ${params['spot_price']:.2f}")
 
-            # Dividend yield
+            # Dividend yield. yfinance >= 0.2.x returns this as a percentage
+            # (e.g. 1.14 means 1.14%); we want a decimal for the pricing engines.
             info = stock.info
             if "dividendYield" in info and info["dividendYield"]:
-                params["dividend_yield"] = float(info["dividendYield"])
+                params["dividend_yield"] = float(info["dividendYield"]) / 100.0
                 logger.debug(f"Fetched dividend yield: {params['dividend_yield']:.2%}")
 
-            # Historical volatility
-            hist_long = stock.history(period="3mo")
+            # Historical volatility — need ~6 months to compute a 90-day window
+            hist_long = stock.history(period="6mo")
             if len(hist_long) > 1:
                 returns = np.log(hist_long["Close"] / hist_long["Close"].shift(1)).dropna()
 

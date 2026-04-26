@@ -4,29 +4,6 @@ import numpy as np
 from . import black_scholes
 
 
-def _polynomial_basis(x: np.ndarray, degree: int = 3) -> None:
-    """Use polynomial basis for continuation value estimation.
-
-    Production systems typically use Laguerre polynomials for better numerical
-    stability, but standard polynomial regression works well and is more portable.
-
-    Note: To upgrade to Laguerre basis (industry standard), would need to:
-    1. Use scipy.special.hermgauss for quadrature integration
-    2. Construct generalized Laguerre polynomials with proper weight function
-    3. Normalize by stock price mean for numerical stability
-
-    This is left as an enhancement for production deployment.
-
-    Args:
-        x: Stock prices (n,)
-        degree: Polynomial degree (default 3)
-
-    Returns:
-        Polynomial coefficients from np.polyfit
-    """
-    pass
-
-
 def price_american(S: float, K: float, r: float, sigma: float, T: float, q: float = 0,
                    n_paths: int = 10000, n_steps: int = 90, variance_reduction: str = "none") -> tuple:
     """Price American option using Monte Carlo LSM.

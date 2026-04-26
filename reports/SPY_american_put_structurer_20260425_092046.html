@@ -1,0 +1,328 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Structurer Review Report</title>
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                min-height: 100vh;
+                padding: 20px;
+            }
+            .container {
+                max-width: 1000px;
+                margin: 0 auto;
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                overflow: hidden;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 40px;
+                text-align: center;
+            }
+            .header h1 {
+                font-size: 2.5em;
+                margin-bottom: 10px;
+            }
+            .header p {
+                font-size: 1em;
+                opacity: 0.9;
+            }
+            .recommendation-banner {
+                background: #10b981;
+                color: white;
+                padding: 30px;
+                text-align: center;
+                font-size: 1.8em;
+                font-weight: bold;
+                border-bottom: 4px solid #10b981;
+            }
+            .grid-2 {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 30px;
+                padding: 40px;
+            }
+            @media (max-width: 900px) {
+                .grid-2 {
+                    grid-template-columns: 1fr;
+                }
+            }
+            .card {
+                border-radius: 8px;
+                padding: 25px;
+                background: #f9fafb;
+                border-left: 4px solid #667eea;
+            }
+            .card h3 {
+                color: #667eea;
+                margin-bottom: 15px;
+                font-size: 1.2em;
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }
+            .card p {
+                line-height: 1.6;
+                color: #374151;
+                margin-bottom: 10px;
+            }
+            .price-display {
+                font-size: 2em;
+                font-weight: bold;
+                color: #667eea;
+                margin: 10px 0;
+            }
+            .edge {
+                font-size: 1.3em;
+                margin: 10px 0;
+                padding: 10px;
+                background: white;
+                border-radius: 6px;
+            }
+            .edge.positive {
+                color: #10b981;
+                border-left: 4px solid #10b981;
+            }
+            .edge.negative {
+                color: #ef4444;
+                border-left: 4px solid #ef4444;
+            }
+            .section {
+                padding: 40px;
+                border-top: 1px solid #e5e7eb;
+            }
+            .section h2 {
+                color: #667eea;
+                margin-bottom: 20px;
+                font-size: 1.5em;
+            }
+            .greeks-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+            .greek-card {
+                background: white;
+                padding: 15px;
+                border-radius: 6px;
+                border: 1px solid #e5e7eb;
+                text-align: center;
+            }
+            .greek-label {
+                font-weight: bold;
+                color: #667eea;
+                font-size: 0.9em;
+                text-transform: uppercase;
+                margin-bottom: 5px;
+            }
+            .greek-assessment {
+                color: #6b7280;
+                font-size: 0.9em;
+                line-height: 1.4;
+            }
+            .risk-bar {
+                background: #e5e7eb;
+                border-radius: 4px;
+                overflow: hidden;
+                height: 30px;
+                margin: 10px 0;
+            }
+            .risk-fill {
+                background: #3b82f6;
+                height: 100%;
+                width: 30%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                color: white;
+                font-weight: bold;
+                font-size: 0.9em;
+            }
+            .analysis-list {
+                list-style: none;
+            }
+            .analysis-list li {
+                padding: 10px 0;
+                border-bottom: 1px solid #f3f4f6;
+                color: #374151;
+            }
+            .analysis-list li:last-child {
+                border-bottom: none;
+            }
+            .analysis-list li strong {
+                color: #667eea;
+            }
+            .exec-summary {
+                background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+                padding: 25px;
+                border-radius: 8px;
+                border-left: 4px solid #667eea;
+                line-height: 1.8;
+                color: #1f2937;
+                font-size: 1.05em;
+            }
+            .footer {
+                background: #f9fafb;
+                padding: 20px 40px;
+                text-align: center;
+                color: #6b7280;
+                font-size: 0.9em;
+                border-top: 1px solid #e5e7eb;
+            }
+            .value-box {
+                background: white;
+                padding: 15px;
+                border-radius: 6px;
+                margin: 10px 0;
+                border: 1px solid #e5e7eb;
+            }
+            .label {
+                color: #6b7280;
+                font-size: 0.85em;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                margin-bottom: 5px;
+            }
+            .value {
+                font-size: 1.5em;
+                font-weight: bold;
+                color: #667eea;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <!-- Header -->
+            <div class="header">
+                <h1>Structurer Review Report</h1>
+                <p>Senior VP Analysis | April 25, 2026 at 09:20:46</p>
+            </div>
+
+            <!-- Recommendation Banner -->
+            <div class="recommendation-banner">
+                STRONG BUY
+            </div>
+
+            <!-- Main Grid -->
+            <div class="grid-2">
+                <!-- Left: Pricing -->
+                <div class="card">
+                    <h3>Fair Value Assessment</h3>
+                    <div class="price-display">$4801.3678</div>
+                    <p class="label">Model Fair Value</p>
+
+                    <div class="value-box">
+                        <div class="label">Market Bid</div>
+                        <div class="value">$137.69</div>
+                    </div>
+                    <div class="value-box">
+                        <div class="label">Market Mid</div>
+                        <div class="value">$139.38</div>
+                    </div>
+                    <div class="value-box">
+                        <div class="label">Market Ask</div>
+                        <div class="value">$141.06</div>
+                    </div>
+
+                    <div class="edge positive">
+                        +3344.93% Edge vs Market
+                    </div>
+                </div>
+
+                <!-- Right: Summary -->
+                <div class="card">
+                    <h3>Executive Summary</h3>
+                    <div class="exec-summary">
+                        American Put on SPY is significantly underpriced. Fair value estimate suggests 3344.9% edge vs market mid. American optionality worth 31.4% premium. Recommend STRONG BUY.
+                    </div>
+                    <div style="margin-top: 20px;">
+                        <p><strong>Recommended Action:</strong> Trading 3344.9% below fair value with good risk/reward</p>
+                        <p style="margin-top: 10px; color: #6b7280; font-size: 0.95em;">Delta hedge: Buy 75 shares per contract</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Greeks Section -->
+            <div class="section">
+                <h2>Greeks Analysis (Risk Sensitivities)</h2>
+                <div class="greeks-grid">
+                    
+        <div class="greek-card">
+            <div class="greek-label">delta</div>
+            <div class="greek-assessment">High directional exposure (delta=-0.755). Behaves mostly like stock.</div>
+        </div>
+        
+        <div class="greek-card">
+            <div class="greek-label">gamma</div>
+            <div class="greek-assessment">Minimal gamma (G=0.000000). Delta essentially constant.</div>
+        </div>
+        
+        <div class="greek-card">
+            <div class="greek-label">vega</div>
+            <div class="greek-assessment">Minimal vega (V=0.02). Essentially vol-insensitive.</div>
+        </div>
+        
+        <div class="greek-card">
+            <div class="greek-label">theta</div>
+            <div class="greek-assessment">Positive theta (T=$375.29/day). Time decay works in your favor.</div>
+        </div>
+        
+        <div class="greek-card">
+            <div class="greek-label">rho</div>
+            <div class="greek-assessment">High rate sensitivity (R=-13.15). Interest rate moves matter. 1% rate move = $13.15 P&L.</div>
+        </div>
+        
+                </div>
+            </div>
+
+            <!-- Risk Assessment -->
+            <div class="section">
+                <h2>Risk Assessment</h2>
+                <div style="margin: 20px 0;">
+                    <p style="margin-bottom: 10px;"><strong>Risk Score: 3/10</strong></p>
+                    <div class="risk-bar">
+                        <div class="risk-fill">3/10</div>
+                    </div>
+                </div>
+
+                <div class="grid-2" style="margin-top: 20px;">
+                    <div class="value-box">
+                        <div class="label">Probability of Profit</div>
+                        <div class="value" style="color: #10b981;">85.9%</div>
+                    </div>
+                    <div class="value-box">
+                        <div class="label">Moneyness Status</div>
+                        <div class="value" style="color: #f59e0b;">ATM (100.28%)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Analysis -->
+            <div class="section">
+                <h2>Detailed Analysis</h2>
+                <ul class="analysis-list">
+                    <li style='font-weight: bold; margin-top: 15px; color: #667eea;'>FAIR VALUE: $4801.3678</li><li>Market price: $137.69 bid / $139.38 mid / $141.06 ask</li><li>Bid/ask spread: 2.42%</li><li>Edge vs market: +3344.93% (Sell if > $4801.37)</li><li style='margin: 5px 0;'></li><li style='font-weight: bold; margin-top: 15px; color: #667eea;'>GREEKS SNAPSHOT:</li><li>  Delta: -0.7545</li><li>  Gamma: +0.0000</li><li>  Vega: +0.0152</li><li>  Theta: +375.2949</li><li>  Rho: -13.1518</li><li style='margin: 5px 0;'></li><li style='font-weight: bold; margin-top: 15px; color: #667eea;'>RISK SCORE: 3/10 (LOW RISK)</li><li>Probability of profit: 85.9%</li><li>Moneyness: 5415.23 / 5400.00 = 100.28%</li><li>Days to expiration: 90</li>
+                </ul>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">
+                <p>This analysis is generated by the Structurer Review Agent for informational purposes.</p>
+                <p>Not financial advice. Consult with compliance before trading.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    

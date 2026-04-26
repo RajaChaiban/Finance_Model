@@ -1,8 +1,8 @@
 option:
   type: european_put
   underlying: SPY
-  spot_price: 5415.23
-  strike_price: 5400
+  spot_price: 715.00
+  strike_price: 710
   days_to_expiration: 90
   risk_free_rate: 0.045
   volatility: 0.1845

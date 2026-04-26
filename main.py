@@ -135,9 +135,8 @@ Examples:
 
         # Calculate Greeks
         print(f"Calculating Greeks...")
-        # Filter params for Greeks function (don't pass barrier_level, etc.)
         greeks_params = {k: v for k, v in pricing_params.items() if k in [
-            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps"
+            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps", "barrier_level"
         ]}
         greeks = greeks_func(**greeks_params)
 

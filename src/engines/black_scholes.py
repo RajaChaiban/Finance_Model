@@ -62,7 +62,10 @@ def greeks_european(S: float, K: float, r: float, sigma: float, T: float, q: flo
     # Same for both
     gamma = np.exp(-q * T) * pdf_d1 / (S * sigma * np.sqrt(T))
     vega = S * np.exp(-q * T) * pdf_d1 * np.sqrt(T) / 100  # per 1% change
-    rho = K * T * np.exp(-r * T) * norm.cdf(d2 if option_type == "call" else -d2) / 100  # per 1% change
+    if option_type == "call":
+        rho = K * T * np.exp(-r * T) * norm.cdf(d2) / 100  # per 1% change
+    else:
+        rho = -K * T * np.exp(-r * T) * norm.cdf(-d2) / 100  # per 1% change
 
     return {
         "delta": float(delta),
