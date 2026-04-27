@@ -6,7 +6,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || (() => {
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:8002`;
+  return `${protocol}//${hostname}:8003`;
 })();
 
 export interface PricingRequest {
@@ -22,6 +22,8 @@ export interface PricingRequest {
   n_steps: number;
   variance_reduction: string;
   barrier_level?: number;
+  use_vol_surface?: boolean;
+  vol_surface_max_expiries?: number;
 }
 
 export interface PricingResult {
@@ -33,6 +35,13 @@ export interface PricingResult {
   underlying: string;
   option_type: string;
   pricing_timestamp: string;
+
+  // Surface diagnostics
+  sigma_used?: number;
+  sigma_atm?: number;
+  sigma_barrier?: number;
+  surface_quotes_inverted?: number;
+  surface_quotes_total?: number;
 }
 
 export class APIClient {

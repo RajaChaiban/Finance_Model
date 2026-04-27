@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { ConfigForm } from "./ConfigForm";
 import { ReportDisplay } from "./ReportDisplay";
-import { ConfigFormState, PricingResult } from "../types";
+import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
 
 export function Dashboard() {
   const [result, setResult] = useState<PricingResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
+  // Lifted form state — survives switching between Configure and Results
+  // tabs so "New Scenario" doesn't wipe the user's spot/strike/etc.
+  const [formData, setFormData] = useState<ConfigFormState>(DEFAULT_CONFIG);
 
   const handlePricingSubmit = async (config: ConfigFormState) => {
     setIsLoading(true);
@@ -25,6 +28,7 @@ export function Dashboard() {
         n_steps: config.nSteps,
         variance_reduction: config.varianceReduction,
         barrier_level: config.barrierLevel,
+        use_vol_surface: config.useVolSurface,
       };
 
       const response = await apiClient.price(request);
@@ -38,6 +42,11 @@ export function Dashboard() {
         underlying: response.underlying,
         optionType: response.option_type,
         pricingTimestamp: response.pricing_timestamp,
+        sigmaUsed: response.sigma_used,
+        sigmaAtm: response.sigma_atm,
+        sigmaBarrier: response.sigma_barrier,
+        surfaceQuotesInverted: response.surface_quotes_inverted,
+        surfaceQuotesTotal: response.surface_quotes_total,
       };
 
       setResult(formattedResult);
@@ -91,6 +100,8 @@ export function Dashboard() {
               <ConfigForm
                 onSubmit={handlePricingSubmit}
                 isLoading={isLoading}
+                formData={formData}
+                setFormData={setFormData}
               />
             </div>
           </section>

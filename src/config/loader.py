@@ -32,6 +32,10 @@ class PricingConfig:
     report_format: str = "html"
     save_to: str = "./reports/"
 
+    # Live IV surface (opt-in via CLI / YAML)
+    use_vol_surface: bool = False
+    vol_surface_max_expiries: int = 6
+
     def __post_init__(self):
         """Validate after initialization."""
         self._validate()
@@ -41,7 +45,12 @@ class PricingConfig:
         errors = []
 
         # Option type
-        valid_types = ["american_put", "american_call", "european_put", "european_call", "knockout_call", "knockout_put"]
+        valid_types = [
+            "american_put", "american_call",
+            "european_put", "european_call",
+            "knockout_call", "knockout_put",
+            "knockin_call", "knockin_put",
+        ]
         if self.option_type not in valid_types:
             errors.append(f"option_type must be one of {valid_types}, got '{self.option_type}'")
 
@@ -76,12 +85,17 @@ class PricingConfig:
         if self.variance_reduction not in ["none", "antithetic"]:
             errors.append(f"variance_reduction must be 'none' or 'antithetic', got '{self.variance_reduction}'")
 
-        # Barrier (if knockout)
-        if "knockout" in self.option_type:
+        # Barrier (KO and KI both require a barrier_level + direction).
+        if "knockout" in self.option_type or "knockin" in self.option_type:
             if self.barrier_level is None:
-                errors.append("knockout options require barrier_level")
-            if self.barrier_type not in ["down_and_out", "up_and_out"]:
-                errors.append(f"barrier_type must be 'down_and_out' or 'up_and_out', got '{self.barrier_type}'")
+                errors.append("barrier options require barrier_level")
+            valid_barrier_types = [
+                "down_and_out", "up_and_out", "down_and_in", "up_and_in",
+            ]
+            if self.barrier_type not in valid_barrier_types:
+                errors.append(
+                    f"barrier_type must be one of {valid_barrier_types}, got '{self.barrier_type}'"
+                )
 
         if errors:
             raise ValueError("Config validation failed:\n  " + "\n  ".join(errors))
@@ -144,6 +158,10 @@ def load_config(config_path: str) -> PricingConfig:
         # Output
         "report_format": output_cfg.get("report_format", "html"),
         "save_to": output_cfg.get("save_to", "./reports/"),
+
+        # Surface (opt-in)
+        "use_vol_surface": option_cfg.get("use_vol_surface", False),
+        "vol_surface_max_expiries": option_cfg.get("vol_surface_max_expiries", 6),
     }
 
     # Validate required fields

@@ -123,6 +123,55 @@ export function ReportDisplay({
         </div>
       </div>
 
+      {result.sigmaAtm !== undefined && result.sigmaAtm !== null && (
+        <div
+          className="surface-banner"
+          style={{
+            margin: "0.75rem 0",
+            padding: "0.85rem 1.1rem",
+            borderRadius: "8px",
+            background:
+              "linear-gradient(90deg, rgba(139, 92, 246, 0.10), rgba(99, 102, 241, 0.08))",
+            border: "1px solid rgba(139, 92, 246, 0.35)",
+            fontSize: "0.9rem",
+            color: "var(--text-primary)",
+            boxShadow: "0 0 24px rgba(139, 92, 246, 0.08)",
+          }}
+        >
+          <strong style={{ color: "var(--accent-hover)" }}>Live IV surface</strong>
+          {" — "}
+          σ at strike:{" "}
+          <strong style={{ color: "var(--text-primary)" }}>
+            {(result.sigmaAtm * 100).toFixed(2)}%
+          </strong>
+          {result.sigmaBarrier !== undefined && result.sigmaBarrier !== null && (
+            <>
+              {" · "}σ at barrier:{" "}
+              <strong style={{ color: "var(--text-primary)" }}>
+                {(result.sigmaBarrier * 100).toFixed(2)}%
+              </strong>
+              {" · "}smile lift:{" "}
+              <strong style={{ color: "var(--text-primary)" }}>
+                {(
+                  (result.sigmaBarrier - result.sigmaAtm) *
+                  10000
+                ).toFixed(0)}{" "}
+                bp
+              </strong>
+            </>
+          )}
+          {result.surfaceQuotesInverted !== undefined && (
+            <>
+              {" · "}
+              <span style={{ color: "var(--text-muted)" }}>
+                {result.surfaceQuotesInverted}/{result.surfaceQuotesTotal}{" "}
+                quotes inverted
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       <div className="report-content">
         <div
           dangerouslySetInnerHTML={{ __html: result.reportHtml }}

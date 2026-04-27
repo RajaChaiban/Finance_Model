@@ -5,9 +5,11 @@ import { apiClient } from "../api/client";
 interface ConfigFormProps {
   onSubmit: (config: ConfigFormState) => Promise<void>;
   isLoading: boolean;
+  formData: ConfigFormState;
+  setFormData: React.Dispatch<React.SetStateAction<ConfigFormState>>;
 }
 
-export function ConfigForm({ onSubmit, isLoading }: ConfigFormProps) {
+export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: ConfigFormProps) {
   const [expandedSections, setExpandedSections] = useState({
     underlier: true,
     optionType: true,
@@ -18,58 +20,69 @@ export function ConfigForm({ onSubmit, isLoading }: ConfigFormProps) {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [fetchingMarketData, setFetchingMarketData] = useState(false);
-  const [formData, setFormData] = useState<ConfigFormState>({
-    underlying: "SPY",
-    spotPrice: 5415.23,
-    optionType: "american_put",
-    strikePrice: 5400,
-    daysToExpiration: 90,
-    riskFreeRate: 0.045,
-    volatility: 0.1845,
-    dividendYield: 0.015,
-    nPaths: 10000,
-    nSteps: 90,
-    varianceReduction: "antithetic",
-  });
 
-  // Fetch market data when underlying or expiration changes
+  // Ticker-driven fetch: spot, dividend yield, vol, dividend info. Fires only
+  // when the underlying changes — re-typing a ticker doesn't re-pull until
+  // the user stops for 500 ms. Strike is reset to ATM only when it's empty
+  // or stale relative to the new spot.
   useEffect(() => {
-    const fetchMarketData = async () => {
-      if (!formData.underlying || formData.underlying.length === 0) return;
+    if (!formData.underlying || formData.underlying.length === 0) return;
 
+    let cancelled = false;
+    const timer = setTimeout(async () => {
       setFetchingMarketData(true);
       try {
-        const [spotPrice, dividendYield, volatility, riskFreeRate, dividendInfo] =
-          await Promise.all([
-            apiClient.getSpotPrice(formData.underlying),
-            apiClient.getDividendYield(formData.underlying),
-            apiClient.getHistoricalVolatility(formData.underlying, 252),
-            apiClient.getRiskFreeRate(formData.daysToExpiration),
-            apiClient.getDividendInfo(formData.underlying),
-          ]);
+        const [spotPrice, dividendYield, volatility] = await Promise.all([
+          apiClient.getSpotPrice(formData.underlying),
+          apiClient.getDividendYield(formData.underlying),
+          apiClient.getHistoricalVolatility(formData.underlying, 252),
+        ]);
+        if (cancelled) return;
 
         setFormData((prev) => ({
           ...prev,
           spotPrice,
           dividendYield,
           volatility,
-          riskFreeRate,
+          strikePrice:
+            prev.strikePrice <= 0 ||
+            Math.abs(prev.strikePrice - spotPrice) / Math.max(spotPrice, 1) > 0.5
+              ? Math.round(spotPrice)
+              : prev.strikePrice,
         }));
       } catch (error) {
-        console.error("Error fetching market data:", error);
-        // Keep existing values on error
+        console.error("Error fetching ticker market data:", error);
       } finally {
-        setFetchingMarketData(false);
+        if (!cancelled) setFetchingMarketData(false);
       }
-    };
-
-    // Debounce: only fetch if user stops typing for 500ms
-    const timer = setTimeout(() => {
-      fetchMarketData();
     }, 500);
 
-    return () => clearTimeout(timer);
-  }, [formData.underlying, formData.daysToExpiration]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formData.underlying, setFormData]);
+
+  // DTE-driven fetch: risk-free rate only. Cheap, just one endpoint.
+  useEffect(() => {
+    if (!formData.daysToExpiration || formData.daysToExpiration <= 0) return;
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const riskFreeRate = await apiClient.getRiskFreeRate(formData.daysToExpiration);
+        if (cancelled) return;
+        setFormData((prev) => ({ ...prev, riskFreeRate }));
+      } catch (error) {
+        console.error("Error fetching risk-free rate:", error);
+      }
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [formData.daysToExpiration, setFormData]);
 
   const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((prev) => ({
@@ -315,7 +328,8 @@ export function ConfigForm({ onSubmit, isLoading }: ConfigFormProps) {
                 Historical volatility (252-day) - can override
               </span>
             </div>
-            {formData.optionType.includes("knockout") && (
+            {(formData.optionType.includes("knockout") ||
+              formData.optionType.includes("knockin")) && (
               <div className="form-group">
                 <label>Barrier Level ($)</label>
                 <input
@@ -329,6 +343,28 @@ export function ConfigForm({ onSubmit, isLoading }: ConfigFormProps) {
                 />
               </div>
             )}
+            <div className="form-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={formData.useVolSurface}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      useVolSurface: e.target.checked,
+                    }))
+                  }
+                  disabled={isLoading}
+                  style={{ marginRight: "0.5rem" }}
+                />
+                Use live IV surface (calibrate from option chain)
+              </label>
+              <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                Slower (~3 s extra) but smile-aware. Recommended for barrier
+                products (knockouts and knockins) — sees the barrier-side vol
+                the flat-σ calculator misses.
+              </span>
+            </div>
           </div>
         )}
       </div>

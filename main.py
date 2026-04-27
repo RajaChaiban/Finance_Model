@@ -57,8 +57,18 @@ Examples:
         action="store_true",
         help="Skip structurer financial analyst review"
     )
+    parser.add_argument(
+        "--use-vol-surface",
+        action="store_true",
+        help="Calibrate a live SPY implied-vol surface from the option chain "
+             "and price against it (requires --fetch-market-data)."
+    )
 
     args = parser.parse_args()
+    if args.use_vol_surface and not args.fetch_market_data:
+        # The surface needs a live chain. Auto-enable rather than error.
+        logger.info("--use-vol-surface implies --fetch-market-data; enabling.")
+        args.fetch_market_data = True
 
     try:
         # Load config
@@ -121,6 +131,58 @@ Examples:
             else:
                 logger.info(f"  Dividend Yield: {config.dividend_yield:.2%} (from config)")
 
+        # Build live IV surface if requested
+        if args.use_vol_surface or config.use_vol_surface:
+            try:
+                import QuantLib as ql
+                from src.api.market_data import fetch_option_chain
+                from src.data.iv_grid import build_iv_grid
+                from src.data.vol_surface import build_vol_surface, sample_sigma_for_closed_form
+
+                logger.info(
+                    f"Calibrating live IV surface for {config.underlying} "
+                    f"(max {config.vol_surface_max_expiries} expiries)..."
+                )
+                chain = fetch_option_chain(
+                    config.underlying,
+                    max_expiries=config.vol_surface_max_expiries,
+                )
+                if not chain:
+                    logger.warning(
+                        "Empty option chain — falling back to flat-vol pricing."
+                    )
+                else:
+                    grid = build_iv_grid(
+                        chain,
+                        S=pricing_params["S"],
+                        r=pricing_params["r"],
+                        q=pricing_params["q"],
+                    )
+                    surface = build_vol_surface(grid)
+                    vol_handle = ql.BlackVolTermStructureHandle(surface)
+                    pricing_params["vol_handle"] = vol_handle
+
+                    # Closed-form bridge: also override scalar σ with the
+                    # smile-aware sample so the hand-coded BS / Reiner-Rubinstein
+                    # paths see a smile-relevant σ when QL isn't available.
+                    pricing_params["sigma"] = sample_sigma_for_closed_form(
+                        surface,
+                        K=pricing_params["K"],
+                        T=pricing_params["T"],
+                        S=pricing_params["S"],
+                        barrier=pricing_params.get("barrier_level"),
+                    )
+                    logger.info(
+                        f"  Surface σ at (K={pricing_params['K']:.2f}, "
+                        f"T={pricing_params['T']:.4f}): "
+                        f"{pricing_params['sigma']:.2%} "
+                        f"(grid {grid.n_quotes_inverted}/{grid.n_quotes_total} quotes)."
+                    )
+            except Exception as exc:
+                logger.warning(
+                    f"Vol surface build failed ({exc}); falling back to flat vol."
+                )
+
         # Route to appropriate pricing engine
         print(f"\nRouting to pricing engine...")
         pricer_func, greeks_func, method_description = router.route(config.option_type)
@@ -136,7 +198,8 @@ Examples:
         # Calculate Greeks
         print(f"Calculating Greeks...")
         greeks_params = {k: v for k, v in pricing_params.items() if k in [
-            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps", "barrier_level"
+            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
+            "barrier_level", "vol_handle",
         ]}
         greeks = greeks_func(**greeks_params)
 

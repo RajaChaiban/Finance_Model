@@ -25,6 +25,12 @@ class PricingRequest(BaseModel):
     barrier_level: Optional[float] = Field(default=None, description="Barrier level for knockout options")
     barrier_type: Optional[str] = Field(default=None, description="Barrier type: 'down_and_out' or 'up_and_out'")
 
+    # Live IV surface (opt-in). When true, the handler fetches the option chain,
+    # inverts each quote to BS implied vol, builds a BlackVarianceSurface, and
+    # passes it to the engine. Adds ~3s for chain fetch + IV inversion.
+    use_vol_surface: bool = Field(default=False, description="Calibrate live IV surface from option chain")
+    vol_surface_max_expiries: int = Field(default=6, description="Front-N expiries for surface fit")
+
 
 class PricingResult(BaseModel):
     """Response schema for /api/price endpoint."""
@@ -37,6 +43,13 @@ class PricingResult(BaseModel):
     underlying: str = Field(..., description="Underlying ticker")
     option_type: str = Field(..., description="Option type")
     pricing_timestamp: str = Field(..., description="ISO timestamp of pricing")
+
+    # Surface diagnostics (populated only when use_vol_surface=True succeeded).
+    sigma_used: Optional[float] = Field(None, description="σ actually fed to the closed-form engine")
+    sigma_atm: Optional[float] = Field(None, description="Surface σ at strike")
+    sigma_barrier: Optional[float] = Field(None, description="Surface σ at barrier (KO only)")
+    surface_quotes_inverted: Optional[int] = Field(None, description="IV grid quotes successfully inverted")
+    surface_quotes_total: Optional[int] = Field(None, description="IV grid quotes attempted")
 
 
 class ErrorResponse(BaseModel):
