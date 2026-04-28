@@ -14,6 +14,7 @@ from .market_data import (
     get_historical_volatility,
     get_dividend_info,
 )
+from .agent_router import router as agent_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,6 +55,9 @@ app = FastAPI(
 
 # Add custom CORS middleware FIRST (before routes)
 app.add_middleware(CustomCORSMiddleware)
+
+# Mount the multi-agent structuring co-pilot router under /api/agent/*
+app.include_router(agent_router)
 
 
 @app.get("/health")

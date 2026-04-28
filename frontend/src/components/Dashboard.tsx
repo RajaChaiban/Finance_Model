@@ -1,10 +1,14 @@
 import { useState } from "react";
 import { ConfigForm } from "./ConfigForm";
 import { ReportDisplay } from "./ReportDisplay";
+import { CopilotPanel } from "./CopilotPanel";
 import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
 
+type Mode = "pricer" | "copilot";
+
 export function Dashboard() {
+  const [mode, setMode] = useState<Mode>("pricer");
   const [result, setResult] = useState<PricingResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
@@ -76,6 +80,26 @@ export function Dashboard() {
 
       {/* Main Content */}
       <div className="main-content">
+        {/* Mode Switcher: Quick Pricer (existing) vs Structuring Co-pilot (new) */}
+        <div className="mode-switcher">
+          <button
+            className={`mode-btn ${mode === "pricer" ? "active" : ""}`}
+            onClick={() => setMode("pricer")}
+          >
+            Quick Pricer
+          </button>
+          <button
+            className={`mode-btn ${mode === "copilot" ? "active" : ""}`}
+            onClick={() => setMode("copilot")}
+          >
+            Structuring Co-pilot
+          </button>
+        </div>
+
+        {mode === "copilot" ? (
+          <CopilotPanel />
+        ) : (
+        <>
         {/* Step Indicator */}
         <div className="step-indicator">
           <div className={`step ${activeStep === 1 ? "active" : "completed"}`}>
@@ -124,6 +148,8 @@ export function Dashboard() {
               />
             </div>
           </section>
+        )}
+        </>
         )}
       </div>
 

@@ -1,0 +1,67 @@
+- generic [ref=e4]:
+  - generic [ref=e6]:
+    - heading "Derivatives Pricing Dashboard" [level=1] [ref=e7]
+    - paragraph [ref=e8]: Professional options pricing with real-time Greeks and risk analysis
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: "1"
+        - generic [ref=e14]: Configure
+      - generic [ref=e16]:
+        - generic [ref=e17]: "2"
+        - generic [ref=e18]: Results
+    - generic [ref=e20]:
+      - heading "Price Your Option" [level=2] [ref=e21]
+      - paragraph [ref=e22]: Enter the option parameters below to calculate price and Greeks
+      - generic [ref=e23]:
+        - generic [ref=e24]:
+          - button "📊 Underlier Selection ▼" [ref=e25] [cursor=pointer]:
+            - generic [ref=e26]: 📊 Underlier Selection
+            - generic [ref=e27]: ▼
+          - generic [ref=e28]:
+            - generic [ref=e29]:
+              - generic [ref=e30]: Ticker
+              - textbox "SPY" [ref=e31]
+            - generic [ref=e32]:
+              - generic [ref=e33]: Spot Price ($)
+              - spinbutton [ref=e34]: "0"
+            - generic [ref=e35]:
+              - generic [ref=e36]: Dividend Yield (%)
+              - spinbutton "Auto-fetched from company info" [ref=e37]: "1.5"
+              - generic [ref=e38]: Auto-fetched (can override)
+        - generic [ref=e39]:
+          - button "⚙️ Option Type ▼" [ref=e40] [cursor=pointer]:
+            - generic [ref=e41]: ⚙️ Option Type
+            - generic [ref=e42]: ▼
+          - generic [ref=e44]:
+            - generic [ref=e45]: Type
+            - combobox [ref=e46]:
+              - option "American Put" [selected]
+              - option "American Call"
+              - option "European Put"
+              - option "European Call"
+              - option "Knockout Put"
+              - option "Knockout Call"
+              - option "Knockin Put"
+              - option "Knockin Call"
+        - generic [ref=e47]:
+          - button "📈 Basic Parameters ▼" [ref=e48] [cursor=pointer]:
+            - generic [ref=e49]: 📈 Basic Parameters
+            - generic [ref=e50]: ▼
+          - generic [ref=e51]:
+            - generic [ref=e52]:
+              - generic [ref=e53]: Strike Price ($)
+              - spinbutton [ref=e54]: "0"
+            - generic [ref=e55]:
+              - generic [ref=e56]: Days to Expiration
+              - spinbutton [ref=e57]: "90"
+        - button "🔧 Advanced Parameters ▶" [ref=e59] [cursor=pointer]:
+          - generic [ref=e60]: 🔧 Advanced Parameters
+          - generic [ref=e61]: ▶
+        - button "⚡ Pricing Configuration ▶" [ref=e63] [cursor=pointer]:
+          - generic [ref=e64]: ⚡ Pricing Configuration
+          - generic [ref=e65]: ▶
+        - button "▶️ Run Pricing" [ref=e66] [cursor=pointer]
+  - contentinfo [ref=e67]:
+    - paragraph [ref=e68]: Built for traders and quants • Powered by QuantLib and Monte Carlo
+    - paragraph [ref=e69]: Monday, April 27, 2026

@@ -37,6 +37,13 @@ Thumbs.db
 *.pkl
 .cache/
 
+# Secrets / agent config — NEVER commit any .env file
+.env
+.env.*
+!.env.example
+*.env
+*.env.local
+
 # Local explanation/reference files (not synced to remote)
 SETUP.md
 SUMMARY.md
