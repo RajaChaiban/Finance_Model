@@ -99,7 +99,23 @@
       "Bash(mkdir tests *)",
       "Bash(DEMO_REPLAY=1 python -m pytest tests/test_agents_smoke.py -v)",
       "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs"
+      "mcp__context7__query-docs",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:8003/health)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5173)",
+      "Bash(curl -s -o /dev/null -w \"vite_http=%{http_code}\\\\n\" http://127.0.0.1:5173)",
+      "Bash(curl -s -o /dev/null -w \"vite_http=%{http_code}\\\\n\" http://127.0.0.1:5178)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5178/)",
+      "Bash(netstat -ano)",
+      "Bash(curl -s http://127.0.0.1:8003/api/agent/sessions/b77df692-fb38-440c-b0bc-7518e8306077)",
+      "Bash(curl -s -X POST http://127.0.0.1:8003/api/agent/sessions/b77df692-fb38-440c-b0bc-7518e8306077/gate/c -H 'Content-Type: application/json' -d '{\"approved\":true}')",
+      "Bash(PYTHONIOENCODING=utf-8 python raja_notes/_build_cheatsheet_notebook.py)",
+      "Bash(PYTHONIOENCODING=utf-8 jupyter nbconvert --to notebook --execute Knockout_Option_Pricer_SP500.ipynb --output _executed.ipynb --ExecutePreprocessor.timeout=300)",
+      "Bash(awk '{print $5}')",
+      "Bash(powershell -Command \"\\(Get-Item .env\\).LastWriteTime\")",
+      "Bash(curl -s -X POST http://127.0.0.1:8003/api/agent/sessions/__TRACKED_VAR__/gate/b -H 'Content-Type: application/json' -d '{\"approved\":true}')",
+      "Bash(curl -s -X POST http://127.0.0.1:8003/api/agent/sessions/__TRACKED_VAR__/gate/c -H 'Content-Type: application/json' -d '{\"approved\":true}')",
+      "Bash(curl *)",
+      "Bash(awk -F/ '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^gemini/\\) print $i, $NF}')"
     ]
   }
 }

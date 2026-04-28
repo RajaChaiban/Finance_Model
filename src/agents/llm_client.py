@@ -32,9 +32,15 @@ logger = logging.getLogger(__name__)
 
 
 # Approximate per-MTok costs (input / output) in USD for prompts ≤ 200K tokens.
-# Source: Google AI for Developers pricing, late 2025. Update when Google
-# changes pricing. Cached-input pricing not used in Phase 1.
+# Source: Google AI for Developers pricing. Update when Google changes pricing.
+# Preview-model pricing is best-effort and may shift — the cost ceiling in
+# orchestrator catches surprises. Unknown models bill at $0 (we just don't
+# track them).
 _PRICING = {
+    # Gemini 3 (preview) — pricing estimated from Google's announced trends.
+    "gemini-3-pro-preview":   {"in": 2.00, "out": 15.00},
+    "gemini-3-flash-preview": {"in": 0.50, "out": 3.50},
+    # Gemini 2.5 (GA).
     "gemini-2.5-pro":         {"in": 1.25, "out": 10.00},
     "gemini-2.5-flash":       {"in": 0.30, "out": 2.50},
     "gemini-2.5-flash-lite":  {"in": 0.10, "out": 0.40},
