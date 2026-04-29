@@ -20,6 +20,7 @@ they're dropped on the next state transition.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from queue import Empty, SimpleQueue
 from typing import Any, Optional
@@ -99,7 +100,13 @@ _GLOBAL_STORE: Optional[SessionStore] = None
 def get_store() -> SessionStore:
     global _GLOBAL_STORE
     if _GLOBAL_STORE is None:
-        _GLOBAL_STORE = SessionStore()
+        if os.getenv("VOL_DESK_PERSIST") == "1":
+            from .persistence import SQLiteSessionStore
+            _GLOBAL_STORE = SQLiteSessionStore(
+                db_path=os.getenv("VOL_DESK_DB_PATH", "vol_desk_sessions.db")
+            )
+        else:
+            _GLOBAL_STORE = SessionStore()
     return _GLOBAL_STORE
 
 
