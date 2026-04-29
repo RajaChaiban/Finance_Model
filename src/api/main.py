@@ -14,6 +14,7 @@ from .market_data import (
     get_historical_volatility,
     get_dividend_info,
 )
+from ..data.movers import get_movers_payload
 from .agent_router import router as agent_router
 
 # Configure logging
@@ -163,6 +164,23 @@ async def fetch_dividend_info(ticker: str):
     logger.info(f"Fetching dividend info for {ticker}")
     info = get_dividend_info(ticker.upper())
     return {"ticker": ticker.upper(), **info}
+
+
+@app.get("/api/market/movers")
+async def fetch_movers(universe: str = "default"):
+    """
+    Fetch top gainers, losers, most-volatile, and major indices for the
+    Vol Desk dashboard.
+
+    Returns a snapshot payload (cached 60s) with indices and ranked stock lists.
+    """
+    logger.info(f"Fetching movers payload (universe={universe})")
+    try:
+        payload = get_movers_payload(universe=universe)
+        return payload
+    except Exception as e:
+        logger.error(f"Failed to build movers payload: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not fetch movers")
 
 
 @app.post("/api/price", response_model=PricingResult)

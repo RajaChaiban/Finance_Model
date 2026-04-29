@@ -1,15 +1,23 @@
 import { PricingResult } from "../types";
+import { PayoffChart } from "./PayoffChart";
+import { GreeksBar } from "./GreeksBar";
 
 interface ReportDisplayProps {
   result: PricingResult | null;
   isLoading: boolean;
   onNewScenario: () => void;
+  spot?: number;
+  strike?: number;
+  barrier?: number;
 }
 
 export function ReportDisplay({
   result,
   isLoading,
   onNewScenario,
+  spot,
+  strike,
+  barrier,
 }: ReportDisplayProps) {
   const downloadHTML = () => {
     if (!result) return;
@@ -169,6 +177,19 @@ export function ReportDisplay({
               </span>
             </>
           )}
+        </div>
+      )}
+
+      {strike !== undefined && spot !== undefined && (
+        <div className="vd-chart-grid">
+          <PayoffChart
+            optionType={result.optionType}
+            strike={strike}
+            spot={spot}
+            premium={result.price}
+            barrier={barrier}
+          />
+          <GreeksBar greeks={result.greeks} />
         </div>
       )}
 

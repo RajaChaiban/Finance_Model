@@ -6,7 +6,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_URL || (() => {
   const protocol = window.location.protocol;
   const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:8003`;
+  return `${protocol}//${hostname}:8002`;
 })();
 
 export interface PricingRequest {
@@ -22,8 +22,28 @@ export interface PricingRequest {
   n_steps: number;
   variance_reduction: string;
   barrier_level?: number;
+  averaging_method?: "geometric" | "arithmetic";
+  averaging_frequency?: "daily" | "weekly" | "monthly";
+  lookback_type?: "fixed" | "floating";
   use_vol_surface?: boolean;
   vol_surface_max_expiries?: number;
+}
+
+export interface MoverRow {
+  ticker: string;
+  price: number;
+  change_pct: number;
+  hv30: number | null;
+  spark: number[];
+}
+
+export interface MoversPayload {
+  as_of: string;
+  indices: MoverRow[];
+  gainers: MoverRow[];
+  losers: MoverRow[];
+  volatile: MoverRow[];
+  source?: "api" | "cache";
 }
 
 export interface PricingResult {
@@ -128,6 +148,19 @@ export class APIClient {
 
     const data = await response.json();
     return data.volatility;
+  }
+
+  async getMovers(universe: string = "default"): Promise<MoversPayload> {
+    const response = await fetch(
+      `${API_BASE_URL}/api/market/movers?universe=${universe}`
+    );
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.detail || "Failed to fetch movers");
+    }
+
+    return response.json();
   }
 
   async getDividendInfo(

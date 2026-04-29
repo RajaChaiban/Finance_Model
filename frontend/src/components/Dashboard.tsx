@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ConfigForm } from "./ConfigForm";
 import { ReportDisplay } from "./ReportDisplay";
 import { CopilotPanel } from "./CopilotPanel";
+import { Header } from "./Header";
+import { IndexTickerStrip } from "./IndexTickerStrip";
+import { MoversGrid } from "./MoversGrid";
 import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
+import { useMarketMovers } from "../hooks/useMarketMovers";
 
 type Mode = "pricer" | "copilot";
 
@@ -12,9 +16,25 @@ export function Dashboard() {
   const [result, setResult] = useState<PricingResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
-  // Lifted form state — survives switching between Configure and Results
-  // tabs so "New Scenario" doesn't wipe the user's spot/strike/etc.
   const [formData, setFormData] = useState<ConfigFormState>(DEFAULT_CONFIG);
+  const configRef = useRef<HTMLDivElement | null>(null);
+
+  const movers = useMarketMovers();
+
+  const handlePickTicker = (ticker: string, price: number) => {
+    const spot = Math.round(price * 100) / 100;
+    setMode("pricer");
+    setActiveStep(1);
+    setFormData((prev) => ({
+      ...prev,
+      underlying: ticker.replace("^", ""),
+      spotPrice: spot,
+      strikePrice: Math.round(spot),
+    }));
+    setTimeout(() => {
+      configRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
 
   const handlePricingSubmit = async (config: ConfigFormState) => {
     setIsLoading(true);
@@ -32,6 +52,9 @@ export function Dashboard() {
         n_steps: config.nSteps,
         variance_reduction: config.varianceReduction,
         barrier_level: config.barrierLevel,
+        averaging_method: config.averagingMethod,
+        averaging_frequency: config.averagingFrequency,
+        lookback_type: config.lookbackType,
         use_vol_surface: config.useVolSurface,
       };
 
@@ -67,8 +90,27 @@ export function Dashboard() {
 
   return (
     <div className="dashboard-onepage">
-      {/* Hero Section */}
-      <section className="hero-section">
+      <Header asOf={movers.data?.as_of} source={movers.data?.source} />
+
+      <div className="vd-market-bar">
+        <div className="vd-market-bar-inner">
+          <IndexTickerStrip
+            indices={movers.data?.indices ?? []}
+            isLoading={movers.isLoading}
+          />
+        </div>
+      </div>
+
+      <MoversGrid
+        gainers={movers.data?.gainers ?? []}
+        losers={movers.data?.losers ?? []}
+        volatile={movers.data?.volatile ?? []}
+        isLoading={movers.isLoading}
+        isStale={movers.isStale}
+        onPickTicker={handlePickTicker}
+      />
+
+      <section className="hero-section vd-hero-condensed">
         <div className="hero-content">
           <h1 className="hero-title">Derivatives Pricing Dashboard</h1>
           <p className="hero-subtitle">
@@ -78,8 +120,7 @@ export function Dashboard() {
         </div>
       </section>
 
-      {/* Main Content */}
-      <div className="main-content">
+      <div className="main-content" ref={configRef}>
         {/* Mode Switcher: Quick Pricer (existing) vs Structuring Co-pilot (new) */}
         <div className="mode-switcher">
           <button
@@ -145,6 +186,9 @@ export function Dashboard() {
                 result={result}
                 isLoading={isLoading}
                 onNewScenario={handleNewScenario}
+                spot={formData.spotPrice}
+                strike={formData.strikePrice}
+                barrier={formData.barrierLevel}
               />
             </div>
           </section>
