@@ -1,7 +1,7 @@
 """Pydantic models for API requests and responses."""
 
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any
 
 
 class PricingRequest(BaseModel):
@@ -31,6 +31,13 @@ class PricingRequest(BaseModel):
 
     # Optional lookback field (only used when option_type starts with 'lookback_')
     lookback_type: Optional[str] = Field(default=None, description="Lookback variant: 'fixed' or 'floating'")
+
+    # Engine selector: "auto" reproduces the existing route() dispatch; "mc" forces
+    # Monte Carlo LSM for American options; "analytic"/"tree"/"fdm" collapse to the
+    # QL default (phase 1 — reserved for future explicit routing).
+    engine: Literal["auto", "analytic", "tree", "mc", "fdm"] = Field(
+        default="auto", description="Pricing engine override: auto|analytic|tree|mc|fdm"
+    )
 
     # Live IV surface (opt-in). When true, the handler fetches the option chain,
     # inverts each quote to BS implied vol, builds a BlackVarianceSurface, and

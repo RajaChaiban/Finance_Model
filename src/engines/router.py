@@ -262,3 +262,46 @@ def _make_lookback_greeks(opt: str) -> Callable:
             option_type=opt, lookback_type=lookback_type,
         )
     return greeks
+
+
+def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable, Callable, str]:
+    """Route honoring an explicit engine selector.
+
+    engine='auto' (default) reproduces the existing route() behaviour.
+    For american_*, engine='mc' forces monte_carlo_lsm regardless of QL.
+    engine='analytic'|'tree'|'fdm' collapse to the QL default for now
+    (reserved for future explicit per-engine routing in later phases).
+
+    Returns:
+        (pricer_func, greeks_func, description)
+
+    Raises:
+        ValueError: If engine is not a recognised selector.
+    """
+    if engine == "auto":
+        return route(option_type)
+
+    if engine == "mc" and option_type in ("american_call", "american_put"):
+        opt = option_type.split("_")[1]
+
+        def pricer(S, K, r, sigma, T, q, n_paths=10000, n_steps=90,
+                   variance_reduction="none", **kwargs):
+            return monte_carlo_lsm.price_american(
+                S, K, r, sigma, T, q, n_paths, n_steps, variance_reduction,
+                option_type=opt,
+            )
+
+        def greeks(S, K, r, sigma, T, q, **kwargs):
+            return monte_carlo_lsm.greeks_american(
+                S, K, r, sigma, T, q, option_type=opt,
+            )
+
+        return pricer, greeks, "Monte Carlo LSM (American, forced)"
+
+    if engine in ("analytic", "tree", "fdm"):
+        # Phase 1: these all collapse to the QL default for now.
+        return route(option_type)
+
+    raise ValueError(
+        f"Unknown engine: {engine!r}. Valid values: auto|analytic|tree|mc|fdm"
+    )

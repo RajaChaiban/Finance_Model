@@ -120,8 +120,10 @@ def price_option(request: PricingRequest) -> PricingResult:
                     f"Surface build failed ({exc}); falling back to scalar σ."
                 )
 
-        # Route to appropriate pricing engine
-        pricer_func, greeks_func, method_description = router.route(config.option_type)
+        # Route to appropriate pricing engine (honours explicit engine selector).
+        pricer_func, greeks_func, method_description = router.route_with_engine(
+            config.option_type, engine=request.engine
+        )
         # When the FD-with-local-vol path is active for KO products, the routed
         # default label "Barrier, Analytical" is misleading — overwrite it.
         if pricing_params.get("use_local_vol_pde"):
