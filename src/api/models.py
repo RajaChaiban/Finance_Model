@@ -1,7 +1,9 @@
 """Pydantic models for API requests and responses."""
 
 from pydantic import BaseModel, Field
-from typing import Literal, Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any, List
+
+from src.analysis.sensitivities import SensitivityBlock
 
 
 class PricingRequest(BaseModel):
@@ -45,6 +47,9 @@ class PricingRequest(BaseModel):
     use_vol_surface: bool = Field(default=False, description="Calibrate live IV surface from option chain")
     vol_surface_max_expiries: int = Field(default=6, description="Front-N expiries for surface fit")
 
+    # Deep risk: when True, compute scenario grid (S x sigma) and gamma ladder.
+    deep_risk: bool = Field(default=False, description="Compute scenario grid + gamma ladder")
+
 
 class PricingResult(BaseModel):
     """Response schema for /api/price endpoint."""
@@ -64,6 +69,10 @@ class PricingResult(BaseModel):
     sigma_barrier: Optional[float] = Field(None, description="Surface σ at barrier (KO only)")
     surface_quotes_inverted: Optional[int] = Field(None, description="IV grid quotes successfully inverted")
     surface_quotes_total: Optional[int] = Field(None, description="IV grid quotes attempted")
+
+    # Deep risk (populated only when request.deep_risk=True).
+    scenario_grid: Optional[SensitivityBlock] = Field(None, description="Price grid across spot x vol shifts")
+    gamma_ladder: Optional[List[Dict[str, float]]] = Field(None, description="Delta and gamma across spot levels")
 
 
 class ErrorResponse(BaseModel):

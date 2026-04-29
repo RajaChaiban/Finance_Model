@@ -171,7 +171,7 @@ def price_option(request: PricingRequest) -> PricingResult:
         report_html = _inject_structurer_analysis(report_html, opinion)
 
         # Create response
-        return PricingResult(
+        result = PricingResult(
             price=price,
             std_error=std_error,
             greeks=greeks,
@@ -186,6 +186,36 @@ def price_option(request: PricingRequest) -> PricingResult:
             surface_quotes_inverted=surface_quotes_inverted,
             surface_quotes_total=surface_quotes_total,
         )
+
+        # Deep risk: scenario grid + gamma ladder (opt-in, computed after primary price).
+        if request.deep_risk:
+            from src.analysis.sensitivities import compute_scenario_grid, compute_gamma_ladder
+            # Use the same core parameters as the primary pricing.
+            S = pricing_params["S"]
+            K = pricing_params["K"]
+            r = pricing_params["r"]
+            sigma = pricing_params["sigma"]
+            T = pricing_params["T"]
+            q = pricing_params["q"]
+            # Forward only non-handle engine kwargs that the engine accepts.
+            engine_kwargs = {
+                k: v for k, v in pricing_params.items()
+                if k not in ("S", "K", "r", "sigma", "T", "q",
+                             "vol_handle", "use_local_vol_pde",
+                             "n_paths", "n_steps", "variance_reduction")
+                and v is not None
+            }
+            result.scenario_grid = compute_scenario_grid(
+                config.option_type, S, K, r, sigma, T, q, **engine_kwargs
+            )
+            result.gamma_ladder = [
+                {"spot": p.spot, "delta": p.delta, "gamma": p.gamma}
+                for p in compute_gamma_ladder(
+                    config.option_type, S, K, r, sigma, T, q, **engine_kwargs
+                )
+            ]
+
+        return result
 
     except Exception as e:
         logger.error(f"Pricing failed: {e}", exc_info=True)
