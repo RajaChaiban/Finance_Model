@@ -49,6 +49,17 @@ SETUP.md
 SUMMARY.md
 raja_notes/
 
+# Test/debug artifacts
+.playwright-mcp/
+e2e-*-result.png
+vol-desk-platform-screenshot.png
+playwright-report/
+test-results/
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/agent-memory/
+
 # CRITICAL: Prevent any cross-project contamination
 # Only files in THIS directory should be tracked
 ../
