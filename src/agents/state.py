@@ -14,10 +14,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ---------------------------------------------------------------------------
@@ -411,3 +411,91 @@ class StructuringSession(BaseModel):
             self.total_tokens_input += entry.tokens_input
         if entry.tokens_output:
             self.total_tokens_output += entry.tokens_output
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — Multi-asset / autocallable foundation types
+# ---------------------------------------------------------------------------
+
+
+class BasketObjective(BaseModel):
+    """Client objective over a basket of underlyings (e.g. worst-of notes)."""
+
+    underliers: list[str] = Field(min_length=1, max_length=10)
+    weights: list[float]
+    worst_of: bool = False
+    maturity_years: float = 1.0
+
+    @field_validator("weights")
+    @classmethod
+    def _weights_sum_close_to_one(cls, v: list[float]) -> list[float]:
+        if abs(sum(v) - 1.0) > 1e-3:
+            raise ValueError("weights must sum to 1.0")
+        return v
+
+
+class ObservationSchedule(BaseModel):
+    """Discrete observation dates expressed as years from today."""
+
+    dates_years: list[float]
+
+    @classmethod
+    def quarterly(cls, maturity_years: float) -> "ObservationSchedule":
+        n = max(1, int(round(maturity_years * 4)))
+        return cls(dates_years=[(i + 1) / 4 for i in range(n)])
+
+    @classmethod
+    def monthly(cls, maturity_years: float) -> "ObservationSchedule":
+        n = max(1, int(round(maturity_years * 12)))
+        return cls(dates_years=[(i + 1) / 12 for i in range(n)])
+
+
+class AutocallTerms(BaseModel):
+    """Barrier and coupon parameters for a Phoenix autocallable structure."""
+
+    coupon_rate: float
+    autocall_barrier: float = 1.00
+    coupon_barrier: float = 0.70
+    protection_barrier: float = 0.60
+    memory: bool = True
+
+    @field_validator("protection_barrier")
+    @classmethod
+    def _layered(cls, v: float, info: Any) -> float:
+        cb = info.data.get("coupon_barrier")
+        if cb is not None and v >= cb:
+            raise ValueError("protection_barrier must be below coupon_barrier")
+        return v
+
+
+class StructureLeg(BaseModel):
+    """A single instrument leg in a multi-asset structure (Phase 6+).
+
+    Distinct from the single-asset `Leg` (agent pipeline leg) above.
+    `side` and `instrument_kind` drive the autocallable / basket engines.
+    """
+
+    side: Literal["long", "short"]
+    quantity: float
+    instrument_kind: Literal[
+        "european_call", "european_put",
+        "knockout_call", "knockout_put",
+        "knockin_call", "knockin_put",
+        "asian_call", "asian_put",
+        "lookback_call", "lookback_put",
+        "zero_coupon", "fixed_coupon",
+    ]
+    strike: Optional[float] = None
+    barrier: Optional[float] = None
+    coupon_rate: Optional[float] = None
+
+
+class Structure(BaseModel):
+    """A named multi-leg, possibly multi-asset structured product."""
+
+    name: str
+    legs: list[StructureLeg]
+    maturity_years: float
+    notional: float = 1_000_000.0
+    autocall_terms: Optional[AutocallTerms] = None
+    observation_schedule: Optional[ObservationSchedule] = None
