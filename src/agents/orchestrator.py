@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 from src.config.agent_config import get_agent_config
 from src.data import market_data
+from src.data.rate_curve import RateCurve
 
 from .base import AgentError
 from .intake import IntakeAgent
@@ -346,11 +347,15 @@ class OrchestratorAgent:
         if not params.get("spot_price"):
             warnings.append("Spot price missing; using $100 placeholder.")
 
+        curve = RateCurve.from_env()
+        maturity_years = (objective.horizon_days / 365.0) if objective.horizon_days else 1.0
+        rfr = curve.spot_rate(maturity_years=maturity_years)
+
         regime = MarketRegime(
             underlying=objective.underlying,
             spot=float(spot),
             dividend_yield=float(params.get("dividend_yield") or 0.015),
-            risk_free_rate=0.045,  # Phase 2: pull SOFR from FRED
+            risk_free_rate=float(rfr),
             realised_vol_30d=params.get("volatility_30d"),
             realised_vol_90d=params.get("volatility_90d"),
             data_source_warnings=warnings,
