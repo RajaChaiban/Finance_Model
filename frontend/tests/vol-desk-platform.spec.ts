@@ -155,7 +155,7 @@ test.describe("Vol Desk — regressions on existing features", () => {
     await expect(copilotBtn).toBeVisible();
 
     await copilotBtn.click();
-    await expect(page.locator(".copilot-panel, .copilot-intake-form")).toBeVisible();
+    await expect(page.locator(".copilot-panel").first()).toBeVisible();
 
     await pricerBtn.click();
     await expect(page.getByRole("heading", { name: /Price Your Option/i })).toBeVisible();
