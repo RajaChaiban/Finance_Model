@@ -56,6 +56,7 @@ export function Dashboard() {
         averaging_frequency: config.averagingFrequency,
         lookback_type: config.lookbackType,
         use_vol_surface: config.useVolSurface,
+        deep_risk: config.deepRisk,
       };
 
       const response = await apiClient.price(request);
@@ -74,6 +75,8 @@ export function Dashboard() {
         sigmaBarrier: response.sigma_barrier,
         surfaceQuotesInverted: response.surface_quotes_inverted,
         surfaceQuotesTotal: response.surface_quotes_total,
+        scenarioGrid: response.scenario_grid,
+        gammaLadder: response.gamma_ladder,
       };
 
       setResult(formattedResult);

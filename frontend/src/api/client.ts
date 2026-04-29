@@ -27,6 +27,7 @@ export interface PricingRequest {
   lookback_type?: "fixed" | "floating";
   use_vol_surface?: boolean;
   vol_surface_max_expiries?: number;
+  deep_risk?: boolean;
 }
 
 export interface MoverRow {
@@ -46,6 +47,18 @@ export interface MoversPayload {
   source?: "api" | "cache";
 }
 
+export interface ScenarioGridRaw {
+  values: number[][];
+  spot_axis: number[];
+  vol_axis: number[];
+}
+
+export interface GammaLadderPointRaw {
+  spot: number;
+  delta: number;
+  gamma: number;
+}
+
 export interface PricingResult {
   price: number;
   std_error?: number;
@@ -62,6 +75,10 @@ export interface PricingResult {
   sigma_barrier?: number;
   surface_quotes_inverted?: number;
   surface_quotes_total?: number;
+
+  // Deep risk — populated only when deep_risk=true on the request
+  scenario_grid?: ScenarioGridRaw;
+  gamma_ladder?: GammaLadderPointRaw[];
 }
 
 export class APIClient {

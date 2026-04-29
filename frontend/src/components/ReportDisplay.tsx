@@ -1,6 +1,7 @@
 import { PricingResult } from "../types";
 import { PayoffChart } from "./PayoffChart";
 import { GreeksBar } from "./GreeksBar";
+import { SensitivityHeatmap } from "./SensitivityHeatmap";
 
 interface ReportDisplayProps {
   result: PricingResult | null;
@@ -191,6 +192,13 @@ export function ReportDisplay({
           />
           <GreeksBar greeks={result.greeks} />
         </div>
+      )}
+
+      {(result.scenarioGrid || result.gammaLadder) && (
+        <SensitivityHeatmap
+          scenarioGrid={result.scenarioGrid}
+          gammaLadder={result.gammaLadder}
+        />
       )}
 
       <div className="report-content">

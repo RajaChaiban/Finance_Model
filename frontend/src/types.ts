@@ -34,6 +34,24 @@ export interface ConfigFormState {
 
   // Live IV surface (opt-in)
   useVolSurface: boolean;
+
+  // Deep risk — scenario grid + gamma ladder
+  deepRisk?: boolean;
+}
+
+// ---- Deep risk types -------------------------------------------------------
+
+export interface ScenarioGrid {
+  /** 2-D price matrix: rows = spot_axis, cols = vol_axis */
+  values: number[][];
+  spot_axis: number[];
+  vol_axis: number[];
+}
+
+export interface GammaLadderPoint {
+  spot: number;
+  delta: number;
+  gamma: number;
 }
 
 export interface PricingResult {
@@ -52,6 +70,10 @@ export interface PricingResult {
   sigmaBarrier?: number;
   surfaceQuotesInverted?: number;
   surfaceQuotesTotal?: number;
+
+  // Deep risk — populated only when deep_risk=true on the request
+  scenarioGrid?: ScenarioGrid;
+  gammaLadder?: GammaLadderPoint[];
 }
 
 export type OptionType =
@@ -102,4 +124,5 @@ export const DEFAULT_CONFIG: ConfigFormState = {
   nSteps: 90,
   varianceReduction: "antithetic",
   useVolSurface: false,
+  deepRisk: false,
 };

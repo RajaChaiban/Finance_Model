@@ -432,6 +432,28 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
                 the flat-σ calculator misses.
               </span>
             </div>
+            <div className="form-group">
+              <label data-testid="deep-risk-label">
+                <input
+                  type="checkbox"
+                  data-testid="deep-risk-checkbox"
+                  checked={formData.deepRisk ?? false}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      deepRisk: e.target.checked,
+                    }))
+                  }
+                  disabled={isLoading}
+                  style={{ marginRight: "0.5rem" }}
+                />
+                Deep risk (scenario grid + gamma ladder)
+              </label>
+              <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                Computes a spot × vol scenario grid and a gamma/delta ladder.
+                Adds a sensitivity heatmap to the results view.
+              </span>
+            </div>
           </div>
         )}
       </div>
