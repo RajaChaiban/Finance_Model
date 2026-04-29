@@ -1,9 +1,13 @@
 """End-to-end API smoke test against a running uvicorn instance.
 
 Hits POST /api/price once per product type (european/american call/put,
-knockout call/put) and prints the resulting price + Greeks. Sanity-checks
-that all six product paths through the router are reachable from the API
-layer with no exceptions.
+knockout call/put, asian call/put, lookback call/put) and prints the
+resulting price + Greeks. Sanity-checks that all router paths are reachable
+from the API layer with no exceptions.
+
+Note: URL hardcoded to 8001 here is a pre-existing pin (the backend
+default in src/api/main.py is 8002). To use against the standard port,
+edit URL locally; not patched in this commit to keep scope tight.
 """
 
 import json
@@ -78,6 +82,57 @@ CASES = [
             "risk_free_rate": 0.05, "volatility": 0.20,
             "dividend_yield": 0.02,
             "barrier_level": 120.0, "barrier_type": "up_and_out",
+        },
+    },
+    {
+        "label": "Asian call (geometric, daily)",
+        "payload": {
+            "option_type": "asian_call",
+            "underlying": "SPY",
+            "spot_price": 100.0, "strike_price": 100.0,
+            "days_to_expiration": 180,
+            "risk_free_rate": 0.05, "volatility": 0.20,
+            "dividend_yield": 0.02,
+            "averaging_method": "geometric",
+            "averaging_frequency": "daily",
+        },
+    },
+    {
+        "label": "Asian put (arithmetic, monthly, MC+CV)",
+        "payload": {
+            "option_type": "asian_put",
+            "underlying": "SPY",
+            "spot_price": 100.0, "strike_price": 100.0,
+            "days_to_expiration": 180,
+            "risk_free_rate": 0.05, "volatility": 0.20,
+            "dividend_yield": 0.02,
+            "averaging_method": "arithmetic",
+            "averaging_frequency": "monthly",
+            "n_paths": 20000,
+        },
+    },
+    {
+        "label": "Lookback call (floating-strike)",
+        "payload": {
+            "option_type": "lookback_call",
+            "underlying": "SPY",
+            "spot_price": 100.0, "strike_price": 100.0,
+            "days_to_expiration": 180,
+            "risk_free_rate": 0.05, "volatility": 0.20,
+            "dividend_yield": 0.02,
+            "lookback_type": "floating",
+        },
+    },
+    {
+        "label": "Lookback put (fixed-strike)",
+        "payload": {
+            "option_type": "lookback_put",
+            "underlying": "SPY",
+            "spot_price": 100.0, "strike_price": 100.0,
+            "days_to_expiration": 180,
+            "risk_free_rate": 0.05, "volatility": 0.20,
+            "dividend_yield": 0.02,
+            "lookback_type": "fixed",
         },
     },
 ]

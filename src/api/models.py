@@ -25,6 +25,13 @@ class PricingRequest(BaseModel):
     barrier_level: Optional[float] = Field(default=None, description="Barrier level for knockout options")
     barrier_type: Optional[str] = Field(default=None, description="Barrier type: 'down_and_out' or 'up_and_out'")
 
+    # Optional Asian fields (only used when option_type starts with 'asian_')
+    averaging_method: Optional[str] = Field(default=None, description="Asian averaging: 'geometric' or 'arithmetic'")
+    averaging_frequency: Optional[str] = Field(default=None, description="Asian fixings: 'daily' | 'weekly' | 'monthly'")
+
+    # Optional lookback field (only used when option_type starts with 'lookback_')
+    lookback_type: Optional[str] = Field(default=None, description="Lookback variant: 'fixed' or 'floating'")
+
     # Live IV surface (opt-in). When true, the handler fetches the option chain,
     # inverts each quote to BS implied vol, builds a BlackVarianceSurface, and
     # passes it to the engine. Adds ~3s for chain fetch + IV inversion.

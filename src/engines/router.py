@@ -5,7 +5,7 @@ Falls back to manual implementations if QuantLib unavailable.
 """
 
 from typing import Callable, Tuple
-from . import black_scholes, monte_carlo_lsm, knockout
+from . import black_scholes, monte_carlo_lsm, knockout, asian, lookback
 
 try:
     from . import quantlib_engine
@@ -64,6 +64,26 @@ def route(option_type: str) -> Tuple[Callable, Callable, str]:
             _make_barrier_pricer("put", kind="in"),
             _make_barrier_greeks("put", kind="in"),
             "QuantLib (Barrier, Analytical)" if QUANTLIB_AVAILABLE else "Reiner-Rubinstein (Analytical, KI via parity)",
+        ),
+        "asian_call": (
+            _make_asian_pricer("call"),
+            _make_asian_greeks("call"),
+            "QuantLib (Asian, Geometric Closed-Form / Arithmetic MC+CV)",
+        ),
+        "asian_put": (
+            _make_asian_pricer("put"),
+            _make_asian_greeks("put"),
+            "QuantLib (Asian, Geometric Closed-Form / Arithmetic MC+CV)",
+        ),
+        "lookback_call": (
+            _make_lookback_pricer("call"),
+            _make_lookback_greeks("call"),
+            "QuantLib (Lookback, Analytical)",
+        ),
+        "lookback_put": (
+            _make_lookback_pricer("put"),
+            _make_lookback_greeks("put"),
+            "QuantLib (Lookback, Analytical)",
         ),
     }
 
@@ -184,4 +204,61 @@ def _make_barrier_greeks(opt: str, kind: str = "out") -> Callable:
         vanilla_g = black_scholes.greeks_european(S, K, r, sigma, T, q, opt)
         return {k: vanilla_g.get(k, 0.0) - ko_g.get(k, 0.0) for k in ko_g.keys()}
 
+    return greeks
+
+
+def _make_asian_pricer(opt: str) -> Callable:
+    """Build an Asian pricer. Pulls averaging_method/averaging_frequency from kwargs.
+
+    Defaults: averaging_method='geometric', averaging_frequency='daily'.
+    """
+    def pricer(S, K, r, sigma, T, q, n_paths=50000, **kwargs):
+        averaging_method = kwargs.get("averaging_method") or "geometric"
+        averaging_frequency = kwargs.get("averaging_frequency") or "daily"
+        return asian.price_asian(
+            S, K, r, sigma, T, q,
+            option_type=opt,
+            averaging_method=averaging_method,
+            averaging_frequency=averaging_frequency,
+            n_paths=n_paths,
+        )
+    return pricer
+
+
+def _make_asian_greeks(opt: str) -> Callable:
+    def greeks(S, K, r, sigma, T, q, n_paths=20000, **kwargs):
+        averaging_method = kwargs.get("averaging_method") or "geometric"
+        averaging_frequency = kwargs.get("averaging_frequency") or "daily"
+        return asian.greeks_asian(
+            S, K, r, sigma, T, q,
+            option_type=opt,
+            averaging_method=averaging_method,
+            averaging_frequency=averaging_frequency,
+            n_paths=n_paths,
+        )
+    return greeks
+
+
+def _make_lookback_pricer(opt: str) -> Callable:
+    """Build a lookback pricer. Pulls lookback_type from kwargs.
+
+    Defaults: lookback_type='fixed'. For floating-strike, K is interpreted
+    as the running extremum (caller passes K=S for a fresh option).
+    """
+    def pricer(S, K, r, sigma, T, q, **kwargs):
+        lookback_type = kwargs.get("lookback_type") or "fixed"
+        return lookback.price_lookback(
+            S, K, r, sigma, T, q,
+            option_type=opt, lookback_type=lookback_type,
+        )
+    return pricer
+
+
+def _make_lookback_greeks(opt: str) -> Callable:
+    def greeks(S, K, r, sigma, T, q, **kwargs):
+        lookback_type = kwargs.get("lookback_type") or "fixed"
+        return lookback.greeks_lookback(
+            S, K, r, sigma, T, q,
+            option_type=opt, lookback_type=lookback_type,
+        )
     return greeks

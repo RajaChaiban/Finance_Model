@@ -343,6 +343,73 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
                 />
               </div>
             )}
+            {formData.optionType.startsWith("asian_") && (
+              <>
+                <div className="form-group">
+                  <label>Averaging Method</label>
+                  <select
+                    value={formData.averagingMethod || "geometric"}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        averagingMethod: e.target.value as "geometric" | "arithmetic",
+                      }))
+                    }
+                    disabled={isLoading}
+                  >
+                    <option value="geometric">Geometric (Closed-form)</option>
+                    <option value="arithmetic">Arithmetic (MC + Control Variate)</option>
+                  </select>
+                  <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                    Geometric has an exact closed form (Kemna-Vorst). Arithmetic
+                    is the market-traded payoff and uses MC with the geometric
+                    Asian as a control variate.
+                  </span>
+                </div>
+                <div className="form-group">
+                  <label>Averaging Frequency</label>
+                  <select
+                    value={formData.averagingFrequency || "daily"}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        averagingFrequency: e.target.value as
+                          | "daily"
+                          | "weekly"
+                          | "monthly",
+                      }))
+                    }
+                    disabled={isLoading}
+                  >
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                </div>
+              </>
+            )}
+            {formData.optionType.startsWith("lookback_") && (
+              <div className="form-group">
+                <label>Lookback Type</label>
+                <select
+                  value={formData.lookbackType || "fixed"}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      lookbackType: e.target.value as "fixed" | "floating",
+                    }))
+                  }
+                  disabled={isLoading}
+                >
+                  <option value="fixed">Fixed-Strike (Conze-Viswanathan)</option>
+                  <option value="floating">Floating-Strike (Goldman-Sosin-Gatto)</option>
+                </select>
+                <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                  Fixed-strike pays max(S_max − K, 0) (call). Floating-strike
+                  pays S_T − S_min (call) — strike is the path's running min/max.
+                </span>
+              </div>
+            )}
             <div className="form-group">
               <label>
                 <input

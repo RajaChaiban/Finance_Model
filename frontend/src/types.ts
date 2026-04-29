@@ -20,6 +20,13 @@ export interface ConfigFormState {
   dividendYield: number;
   barrierLevel?: number;
 
+  // Asian (only used when optionType startsWith "asian_")
+  averagingMethod?: "geometric" | "arithmetic";
+  averagingFrequency?: "daily" | "weekly" | "monthly";
+
+  // Lookback (only used when optionType startsWith "lookback_")
+  lookbackType?: "fixed" | "floating";
+
   // Pricing Configuration
   nPaths: number;
   nSteps: number;
@@ -55,7 +62,11 @@ export type OptionType =
   | "knockout_put"
   | "knockout_call"
   | "knockin_put"
-  | "knockin_call";
+  | "knockin_call"
+  | "asian_call"
+  | "asian_put"
+  | "lookback_call"
+  | "lookback_put";
 
 export const OPTION_TYPES: Record<OptionType, string> = {
   american_put: "American Put",
@@ -66,6 +77,10 @@ export const OPTION_TYPES: Record<OptionType, string> = {
   knockout_call: "Knockout Call",
   knockin_put: "Knockin Put",
   knockin_call: "Knockin Call",
+  asian_call: "Asian Call (Average Price)",
+  asian_put: "Asian Put (Average Price)",
+  lookback_call: "Lookback Call",
+  lookback_put: "Lookback Put",
 };
 
 export const VARIANCE_REDUCTION_METHODS = [

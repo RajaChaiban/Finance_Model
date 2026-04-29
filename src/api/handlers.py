@@ -42,6 +42,9 @@ def price_option(request: PricingRequest) -> PricingResult:
             "n_steps": config.n_steps,
             "variance_reduction": config.variance_reduction,
             "barrier_level": config.barrier_level,
+            "averaging_method": config.averaging_method,
+            "averaging_frequency": config.averaging_frequency,
+            "lookback_type": config.lookback_type,
         }
 
         # Live IV surface (opt-in). On any failure, fall back to the scalar
@@ -134,7 +137,8 @@ def price_option(request: PricingRequest) -> PricingResult:
             k: v
             for k, v in pricing_params.items()
             if k in ["S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
-                     "barrier_level", "vol_handle", "use_local_vol_pde"]
+                     "barrier_level", "vol_handle", "use_local_vol_pde",
+                     "averaging_method", "averaging_frequency", "lookback_type"]
         }
         greeks = greeks_func(**greeks_params)
 
@@ -217,6 +221,9 @@ def _request_to_config(request: PricingRequest) -> PricingConfig:
         variance_reduction=request.variance_reduction,
         barrier_level=request.barrier_level,
         barrier_type=barrier_type,
+        averaging_method=request.averaging_method,
+        averaging_frequency=request.averaging_frequency,
+        lookback_type=request.lookback_type,
         save_to="./reports/",
     )
 

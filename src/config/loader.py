@@ -28,6 +28,13 @@ class PricingConfig:
     barrier_level: Optional[float] = None
     barrier_type: Optional[str] = None
 
+    # Optional Asian fields
+    averaging_method: Optional[str] = None       # "geometric" | "arithmetic"
+    averaging_frequency: Optional[str] = None    # "daily" | "weekly" | "monthly"
+
+    # Optional lookback fields
+    lookback_type: Optional[str] = None          # "fixed" | "floating"
+
     # Output
     report_format: str = "html"
     save_to: str = "./reports/"
@@ -50,6 +57,8 @@ class PricingConfig:
             "european_put", "european_call",
             "knockout_call", "knockout_put",
             "knockin_call", "knockin_put",
+            "asian_call", "asian_put",
+            "lookback_call", "lookback_put",
         ]
         if self.option_type not in valid_types:
             errors.append(f"option_type must be one of {valid_types}, got '{self.option_type}'")
@@ -95,6 +104,30 @@ class PricingConfig:
             if self.barrier_type not in valid_barrier_types:
                 errors.append(
                     f"barrier_type must be one of {valid_barrier_types}, got '{self.barrier_type}'"
+                )
+
+        # Asian: averaging method + frequency. Default if omitted.
+        if self.option_type.startswith("asian_"):
+            if self.averaging_method is None:
+                self.averaging_method = "geometric"
+            if self.averaging_frequency is None:
+                self.averaging_frequency = "daily"
+            if self.averaging_method not in ("geometric", "arithmetic"):
+                errors.append(
+                    f"averaging_method must be 'geometric' or 'arithmetic', got '{self.averaging_method}'"
+                )
+            if self.averaging_frequency not in ("daily", "weekly", "monthly"):
+                errors.append(
+                    f"averaging_frequency must be 'daily'|'weekly'|'monthly', got '{self.averaging_frequency}'"
+                )
+
+        # Lookback: fixed or floating strike. Default if omitted.
+        if self.option_type.startswith("lookback_"):
+            if self.lookback_type is None:
+                self.lookback_type = "fixed"
+            if self.lookback_type not in ("fixed", "floating"):
+                errors.append(
+                    f"lookback_type must be 'fixed' or 'floating', got '{self.lookback_type}'"
                 )
 
         if errors:
@@ -154,6 +187,11 @@ def load_config(config_path: str) -> PricingConfig:
         # Barrier
         "barrier_level": option_cfg.get("barrier_level"),
         "barrier_type": option_cfg.get("barrier_type"),
+
+        # Asian / lookback (optional; defaulted in _validate)
+        "averaging_method": option_cfg.get("averaging_method"),
+        "averaging_frequency": option_cfg.get("averaging_frequency"),
+        "lookback_type": option_cfg.get("lookback_type"),
 
         # Output
         "report_format": output_cfg.get("report_format", "html"),
