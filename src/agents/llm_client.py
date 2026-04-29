@@ -27,6 +27,14 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.config.agent_config import AgentConfig, get_agent_config
+from src.agents.llm_provider import (  # noqa: F401  (re-exported for tests)
+    LLMProvider,
+    GeminiProvider,
+    AnthropicProvider,
+    OpenAIProvider,
+    MockProvider,
+    get_provider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +79,13 @@ class LLMUnavailableError(RuntimeError):
 
 
 class LLMClient:
-    """One client per process is fine. The Google SDK is thread-safe."""
+    """One client per process is fine. The Google SDK is thread-safe.
+
+    Delegates to an :class:`LLMProvider` selected via the ``LLM_PROVIDER``
+    env var (default: ``gemini``).  The rich ``LLMResult`` with token counts
+    and cost is built here — not inside the provider — so agents continue to
+    receive full audit data regardless of which provider is active.
+    """
 
     def __init__(self, cfg: Optional[AgentConfig] = None) -> None:
         self.cfg = cfg or get_agent_config()
@@ -79,6 +93,7 @@ class LLMClient:
         self._client = None
         self._types = None
         self._replay_cache: Optional[dict[str, Any]] = None
+        self._provider: Optional[LLMProvider] = None
 
         if self.cfg.demo_replay:
             self._load_replay_cache()
@@ -91,14 +106,21 @@ class LLMClient:
             return
 
         try:
-            from google import genai  # type: ignore[import-not-found]
-            from google.genai import types as genai_types  # type: ignore[import-not-found]
+            # Build the provider via the abstraction layer.  For Gemini we also
+            # keep _client/_types for the cost-tracking code path which needs
+            # the raw SDK response object.
+            self._provider = get_provider()
 
-            self._genai = genai
-            self._types = genai_types
-            self._client = genai.Client(api_key=self.cfg.gemini_api_key)
+            if isinstance(self._provider, GeminiProvider):
+                # Re-use the already-initialised SDK objects from the provider.
+                self._genai = self._provider._genai
+                self._client = self._provider._client
+                from google.genai import types as genai_types  # type: ignore[import-not-found]
+                self._types = genai_types
         except ImportError:
             logger.warning("google-genai SDK not installed. pip install google-genai")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LLM provider initialisation failed: %s", exc)
 
     # ------------------------------------------------------------------
     # Replay mode
