@@ -55,6 +55,7 @@ export function Dashboard() {
         averaging_method: config.averagingMethod,
         averaging_frequency: config.averagingFrequency,
         lookback_type: config.lookbackType,
+        engine: config.engine ?? "auto",
         use_vol_surface: config.useVolSurface,
         deep_risk: config.deepRisk,
       };

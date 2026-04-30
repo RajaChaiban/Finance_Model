@@ -1,5 +1,11 @@
 import { useState, useEffect } from "react";
-import { ConfigFormState, OPTION_TYPES, VARIANCE_REDUCTION_METHODS } from "../types";
+import {
+  ConfigFormState,
+  OPTION_TYPES,
+  OPTION_TYPE_GROUPS,
+  ENGINE_OPTIONS,
+  VARIANCE_REDUCTION_METHODS,
+} from "../types";
 import { apiClient } from "../api/client";
 
 interface ConfigFormProps {
@@ -224,13 +230,41 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
                 value={formData.optionType}
                 onChange={(e) => handleChange("optionType", e.target.value)}
                 disabled={isLoading}
+                data-testid="option-type-select"
               >
-                {Object.entries(OPTION_TYPES).map(([value, label]) => (
-                  <option key={value} value={value}>
-                    {label}
+                {OPTION_TYPE_GROUPS.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.types.map((value) => (
+                      <option key={value} value={value}>
+                        {OPTION_TYPES[value]}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label>Engine</label>
+              <select
+                value={formData.engine ?? "auto"}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    engine: e.target.value as ConfigFormState["engine"],
+                  }))
+                }
+                disabled={isLoading}
+                data-testid="engine-select"
+              >
+                {ENGINE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
                   </option>
                 ))}
               </select>
+              <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                {ENGINE_OPTIONS.find((o) => o.value === (formData.engine ?? "auto"))?.hint}
+              </span>
             </div>
           </div>
         )}
@@ -458,14 +492,19 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
         )}
       </div>
 
-      {/* Pricing Configuration Section */}
-      <div className="form-section">
+      {/* Pricing Configuration Section — only relevant when Monte Carlo
+          will actually run. We hide it entirely otherwise so European /
+          tree-priced American users don't see phantom controls. */}
+      {(formData.engine === "mc" ||
+        (formData.optionType.startsWith("asian_") &&
+          formData.averagingMethod === "arithmetic")) && (
+      <div className="form-section" data-testid="pricing-config-section">
         <button
           type="button"
           className="section-header"
           onClick={() => toggleSection("pricingConfig")}
         >
-          <span>⚡ Pricing Configuration</span>
+          <span>⚡ Monte Carlo Configuration</span>
           <span>{expandedSections.pricingConfig ? "▼" : "▶"}</span>
         </button>
         {expandedSections.pricingConfig && (
@@ -514,6 +553,7 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
           </div>
         )}
       </div>
+      )}
 
       {/* Submit Error */}
       {errors.submit && (

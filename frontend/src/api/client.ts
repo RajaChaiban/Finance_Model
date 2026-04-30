@@ -23,6 +23,7 @@ export interface PricingRequest {
   averaging_method?: "geometric" | "arithmetic";
   averaging_frequency?: "daily" | "weekly" | "monthly";
   lookback_type?: "fixed" | "floating";
+  engine?: "auto" | "analytic" | "tree" | "mc" | "fdm";
   use_vol_surface?: boolean;
   vol_surface_max_expiries?: number;
   deep_risk?: boolean;

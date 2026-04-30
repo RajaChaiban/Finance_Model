@@ -32,6 +32,10 @@ export interface ConfigFormState {
   nSteps: number;
   varianceReduction: string;
 
+  // Engine selector — defaults to "auto" which lets the backend pick.
+  // "mc" forces Monte Carlo (Longstaff-Schwartz for American).
+  engine?: "auto" | "analytic" | "tree" | "mc" | "fdm";
+
   // Live IV surface (opt-in)
   useVolSurface: boolean;
 
@@ -105,6 +109,41 @@ export const OPTION_TYPES: Record<OptionType, string> = {
   lookback_put: "Lookback Put",
 };
 
+// Grouped for the option-type dropdown so users see Vanilla / Barrier /
+// Path-Dependent rather than a flat 12-item list.
+export const OPTION_TYPE_GROUPS: { label: string; types: OptionType[] }[] = [
+  {
+    label: "Vanilla",
+    types: ["european_call", "european_put", "american_call", "american_put"],
+  },
+  {
+    label: "Barrier",
+    types: ["knockout_call", "knockout_put", "knockin_call", "knockin_put"],
+  },
+  {
+    label: "Path-Dependent",
+    types: ["asian_call", "asian_put", "lookback_call", "lookback_put"],
+  },
+];
+
+// Engine selector — friendly labels in the UI map to the backend's
+// engine field. We expose only "auto" and "mc" by default; analytic/tree/fdm
+// are reserved for future explicit routing.
+export const ENGINE_OPTIONS: { value: NonNullable<ConfigFormState["engine"]>; label: string; hint: string }[] = [
+  {
+    value: "auto",
+    label: "Auto (recommended)",
+    hint:
+      "Let the pricer pick. European → closed-form, American → binomial tree, Asian/Lookback → analytic where possible.",
+  },
+  {
+    value: "mc",
+    label: "Most accurate (Monte Carlo)",
+    hint:
+      "Force Longstaff-Schwartz Monte Carlo. Useful for American options when you want a path-based price with a standard error. Slower than the tree.",
+  },
+];
+
 export const VARIANCE_REDUCTION_METHODS = [
   { value: "none", label: "None" },
   { value: "antithetic", label: "Antithetic" },
@@ -123,6 +162,7 @@ export const DEFAULT_CONFIG: ConfigFormState = {
   nPaths: 10000,
   nSteps: 90,
   varianceReduction: "antithetic",
+  engine: "auto",
   useVolSurface: false,
   deepRisk: false,
 };
