@@ -37,6 +37,13 @@ Thumbs.db
 *.pkl
 .cache/
 
+# Runtime ChromaDB stores for the market-intelligence layer.
+# The seed corpus (data/market_intel_seed/) IS tracked; the live
+# vector store (data/market_intel/) is regenerated from seed and
+# should not be committed.
+data/market_intel/
+frontend/data/market_intel/
+
 # Secrets / agent config — NEVER commit any .env file
 .env
 .env.*

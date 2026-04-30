@@ -61,6 +61,35 @@ app.add_middleware(CustomCORSMiddleware)
 app.include_router(agent_router)
 
 
+@app.on_event("startup")
+async def _init_market_intelligence() -> None:
+    """Initialise the RAG layer once at process start.
+
+    Resolves the singleton (no-op when MARKET_INTEL_ENABLED=0 or when heavy
+    deps are missing) and exposes it on `app.state.market_intel`. Agents
+    read the same singleton via `get_market_intelligence()` so this is also
+    available off the request — `app.state` is just a convenient hook for
+    request handlers that want the reference.
+    """
+    try:
+        from src.agents.market_intelligence import get_market_intelligence
+    except Exception as exc:  # noqa: BLE001
+        logger.info("MarketIntelligence module not importable: %s", exc)
+        app.state.market_intel = None
+        return
+
+    mi = get_market_intelligence()
+    app.state.market_intel = mi
+    if mi is None:
+        logger.info("MarketIntelligence is OFF (MARKET_INTEL_ENABLED=0 or unavailable).")
+    else:
+        try:
+            count = mi.count()
+        except Exception:  # noqa: BLE001
+            count = "?"
+        logger.info("MarketIntelligence ON — corpus has %s documents.", count)
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""

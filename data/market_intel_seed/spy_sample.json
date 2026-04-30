@@ -1,0 +1,44 @@
+[
+  {
+    "id": "spy-mw-2026-04-week-17",
+    "doc_type": "market_window",
+    "asset_class": "SPY",
+    "content": "SPX/SPY market window assessment, week of 2026-04-22. Window is OPEN for vanilla and barrier structures. 1M ATM IV trading 14.5, 3M ATM IV at 16.2, 6M at 17.8 — modest term-structure slope, no inversion. Skew 25-delta put/call risk reversal at -3.5 vol points (25Δ put 17.5 / 25Δ call 14.0), broadly typical post-earnings range. Liquidity strong on SPY listed strikes within ±15% of spot; barrier structures with 3M tenor and 80-110% barriers quote tight (1-2 vol points bid-ask). Investor appetite skews to defensive — collars and put spreads moving fast on RFQs from asset managers. Cautiously OPEN for autocallable / worst-of paper given recent correlation pickup."
+  },
+  {
+    "id": "spy-deal-2026-q1-collar-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Asset manager $50M SPY zero-cost collar, 6M tenor, struck Q1 2026. Long 95% put, short 108% call, both European exercise. Indicative print at -2bps net (effectively zero-cost). Vega negative on the structure. Hedged through the SPY listed market with no slippage. Client rationale was downside protection through summer FOMC sequence with tolerance for capped upside above 8%."
+  },
+  {
+    "id": "spy-deal-2026-q1-koput-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Family office $25M SPY 3M down-and-out put, K=ATM, B=85%. Net premium 95bps, ~30% cheaper than vanilla 3M ATM put (which printed at 138bps same week). Continuous monitoring. Hedged via the OTC bank with a small inventory adjustment. Client motivation: cheap tail hedge, willing to forgo protection if SPY rallies and then drops back through 85%."
+  },
+  {
+    "id": "spy-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "SPY",
+    "content": "Pricing benchmark — Q1 2026 SPY listed/OTC reference levels. 3M ATM call 145bps of spot, 3M ATM put 138bps. 3M 95% put 105bps, 3M 90% put 75bps. 3M ko_put 80% barrier 95bps (roughly 70% of vanilla). 6M ATM straddle 295bps. Realized 30d vol 13%, 90d 14.5% — implieds running 1-2 vol points rich vs realized, normal carry environment. Hedging-cost premium for OTC structures: 5-15bps depending on barrier proximity and tenor."
+  },
+  {
+    "id": "aapl-mw-2026-04-earnings",
+    "doc_type": "market_window",
+    "asset_class": "AAPL",
+    "content": "AAPL market window for May 2026, post-Q2 earnings cycle. CAUTIOUS — IV term structure inverted into the May 2 earnings date (1W IV 38, 1M IV 27, 3M IV 24). Skew steep on the put side. Recommend buyers wait for post-earnings vol crush before establishing structures unless they explicitly want to own earnings vol. Risk reversal trades at -5 vol points on 25-delta wings. Single-name barrier structures harder to quote in this regime — dealers raise the discrete-monitoring shift to account for headline gap risk."
+  },
+  {
+    "id": "general-rule-barrier-pin-risk",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Barrier structures struck within 5% of spot carry significant pin-risk and discrete-monitoring slippage. Standard desk practice: widen the BGK shift by an additional 25% when monitoring is daily and barrier is within 5% of spot. Validator agents should flag any KO/KI structure whose barrier sits inside this band as 'requires senior review' rather than auto-approving."
+  },
+  {
+    "id": "general-rule-vega-vs-realized",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Vol regime guidance — When implied vol runs 2+ points above realized for 30+ days, premium-payer structures (long puts, long calls, debit spreads) tend to bleed theta faster than the realized-vol move justifies. Consider shifting to credit structures (covered calls, ratio spreads) or barrier structures (KO calls/puts) which monetize the implied-realized gap. The corpus has multiple Q1 2026 examples where 3M long puts on SPY underperformed pure linear short delta by 60-80bps over 90 days."
+  }
+]

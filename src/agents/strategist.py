@@ -16,7 +16,8 @@ table stays as the schema-of-thought and as a fallback.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import re
+from typing import Any, Optional
 
 from src.config.agent_config import get_agent_config
 
@@ -26,6 +27,17 @@ from .rules import build_candidates, match_rules
 from .state import Candidate, ClientObjective, MarketRegime, StructuringSession
 
 logger = logging.getLogger(__name__)
+
+
+# A senior-structurer prefix appended to candidate rationales when the
+# market-window query returns a CLOSED verdict for the underlying.
+_CLOSED_WINDOW_WARNING = (
+    "Market-window check: dealer corpus flags issuance window as CLOSED for this "
+    "underlier and tenor. Treat the indicative price as a soft level — a live "
+    "axe is unlikely. Recommend deferring or re-shaping. "
+)
+
+_CLOSED_PATTERN = re.compile(r"\bCLOSED\b")
 
 
 _STRATEGIST_POLISH_SYSTEM = """You are a senior derivatives structurer at an institutional bank.
@@ -52,11 +64,18 @@ Constraints:
 class StrategistAgent(BaseAgent):
     name = "StrategistAgent"
 
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        self.mi = mi
+
     def _run(self, session: StructuringSession) -> StructuringSession:
         if session.objective is None:
             raise AgentError("StrategistAgent requires a ClientObjective.")
         if session.regime is None:
             raise AgentError("StrategistAgent requires a MarketRegime.")
+
+        # Market-window check happens BEFORE candidate construction so the
+        # rationale text can reflect the verdict ("CLOSED" → softened tone).
+        window_closed = self._check_market_window(session)
 
         rule = match_rules(session.objective, session.regime)
         candidates = build_candidates(rule, session.objective, session.regime)
@@ -72,8 +91,41 @@ class StrategistAgent(BaseAgent):
             if replacement:
                 cand.rationale = replacement
 
+        if window_closed:
+            for cand in candidates:
+                cand.rationale = _CLOSED_WINDOW_WARNING + cand.rationale
+
         session.candidates = candidates
         return session
+
+    # ------------------------------------------------------------------
+    # Market-window check (RAG)
+    # ------------------------------------------------------------------
+
+    def _check_market_window(self, session: StructuringSession) -> bool:
+        """Returns True iff the corpus flags the market as CLOSED for this
+        underlier. Always safe to call — returns False on any failure or
+        when MI is disabled.
+        """
+        if self.mi is None or session.objective is None:
+            return False
+        try:
+            qr = self.mi.query_market_window(
+                asset_class=session.objective.underlying,
+                context=(
+                    f"horizon {session.objective.horizon_days}d, view "
+                    f"{session.objective.view}, premium budget "
+                    f"{session.objective.budget_bps_notional}bps"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Strategist MI query_market_window failed: %s", exc)
+            return False
+
+        self._record_market_context(session, intent="market_window", qr=qr)
+
+        answer = (getattr(qr, "answer", "") or "").upper()
+        return bool(_CLOSED_PATTERN.search(answer))
 
     # ------------------------------------------------------------------
     # Optional LLM polish

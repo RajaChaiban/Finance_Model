@@ -89,9 +89,25 @@ class AgentConfig:
     request_timeout_s: float = 60.0
     max_retries: int = 2
 
+    # ------------------------------------------------------------------
+    # Market-intelligence (RAG) layer — see src/agents/market_intelligence.py
+    # ------------------------------------------------------------------
+    market_intel_enabled: bool = True
+    market_intel_persist_dir: str = "./data/market_intel"
+    market_intel_collection: str = "market-intelligence"
+    market_intel_embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Which Gemini tier the MI prompts call. Free-form Q&A is short-context
+    # and structured — fast tier is the right default.
+    market_intel_model: str = DEFAULT_MODEL_FAST
+
     @property
     def has_gemini(self) -> bool:
         return bool(self.gemini_api_key) and not self.demo_replay
+
+    @property
+    def market_intel_active(self) -> bool:
+        """MI runs when the flag is on AND we have a usable LLM (live or replay)."""
+        return self.market_intel_enabled and (self.has_gemini or self.demo_replay)
 
 
 def _from_env() -> AgentConfig:
@@ -123,6 +139,19 @@ def _from_env() -> AgentConfig:
         model_intake=_per_agent("AGENT_MODEL_INTAKE", fast),
         model_validator=_per_agent("AGENT_MODEL_VALIDATOR", fast),
         model_scenario=_per_agent("AGENT_MODEL_SCENARIO", fast),
+        market_intel_enabled=os.getenv("MARKET_INTEL_ENABLED", "1").strip()
+            in {"1", "true", "True"},
+        market_intel_persist_dir=os.getenv(
+            "MARKET_INTEL_PERSIST_DIR", "./data/market_intel"
+        ).strip() or "./data/market_intel",
+        market_intel_collection=os.getenv(
+            "MARKET_INTEL_COLLECTION", "market-intelligence"
+        ).strip() or "market-intelligence",
+        market_intel_embeddings_model=os.getenv(
+            "MARKET_INTEL_EMBEDDINGS_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        ).strip() or "sentence-transformers/all-MiniLM-L6-v2",
+        market_intel_model=_per_agent("AGENT_MODEL_MARKET_INTEL", fast),
     )
 
 

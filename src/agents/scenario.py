@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
-from typing import Optional
+from typing import Any, Optional
 
 from .base import BaseAgent
 from .pricing import PricingAgent
@@ -62,8 +62,11 @@ _SCENARIOS = [
 class ScenarioAgent(BaseAgent):
     name = "ScenarioAgent"
 
-    def __init__(self) -> None:
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        # Internal pricer doesn't need MI — scenario shocks aren't a place
+        # to call out to the corpus on every shocked re-price.
         self._pricer = PricingAgent()
+        self.mi = mi
 
     def _run(self, session: StructuringSession) -> StructuringSession:
         if session.regime is None or not session.priced:
@@ -74,7 +77,43 @@ class ScenarioAgent(BaseAgent):
         for pc in session.priced:
             reports.append(self._scenario_report(pc, session.regime))
         session.scenarios = reports
+
+        # One MI call per session asking the corpus how comparable structures
+        # behaved historically under the shock regime we just modelled.
+        self._enrich_with_history(session, reports)
         return session
+
+    # ------------------------------------------------------------------
+    # Market intelligence (free-form historical scenario context)
+    # ------------------------------------------------------------------
+
+    def _enrich_with_history(
+        self,
+        session: StructuringSession,
+        reports: list[ScenarioReport],
+    ) -> None:
+        if self.mi is None or session.objective is None or not reports:
+            return
+        underlying = session.objective.underlying
+        # Take the worst scenario across all candidates as the framing question.
+        worst_pnl = 0.0
+        worst_label = ""
+        for rep in reports:
+            for row in rep.scenarios:
+                if row.pnl_usd < worst_pnl:
+                    worst_pnl = row.pnl_usd
+                    worst_label = row.name
+        question = (
+            f"Under a {worst_label or 'stress'} scenario for {underlying}, "
+            "how have comparable hedged structures historically performed? "
+            "What hedging-cost slippage is typical when vol spikes alongside spot moves?"
+        )
+        try:
+            qr = self.mi.general_query(query=question, asset_class=underlying)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Scenario MI general_query failed: %s", exc)
+            return
+        self._record_market_context(session, intent="general", qr=qr)
 
     # ------------------------------------------------------------------
     # Per-candidate

@@ -48,6 +48,21 @@ from .validator import ValidatorAgent
 logger = logging.getLogger(__name__)
 
 
+def _resolve_market_intel():
+    """Lazy import + resolution. Heavy deps (chromadb, sentence-transformers)
+    only get pulled in when the flag is on AND import succeeds."""
+    try:
+        from .market_intelligence import get_market_intelligence
+    except Exception as exc:  # noqa: BLE001
+        logger.info("MarketIntelligence module unavailable: %s", exc)
+        return None
+    try:
+        return get_market_intelligence()
+    except Exception as exc:  # noqa: BLE001
+        logger.info("MarketIntelligence resolution failed: %s", exc)
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Session store — single-process, in-memory. Phase 6 swaps for SQLite.
 # ---------------------------------------------------------------------------
@@ -124,14 +139,22 @@ def reset_store() -> None:
 class OrchestratorAgent:
     """Owns the state machine. Stateless across sessions; uses SessionStore."""
 
-    def __init__(self, store: Optional[SessionStore] = None) -> None:
+    def __init__(
+        self,
+        store: Optional[SessionStore] = None,
+        market_intel: Optional[Any] = None,
+    ) -> None:
         self.store = store or get_store()
-        self.intake = IntakeAgent()
-        self.strategist = StrategistAgent()
-        self.pricing = PricingAgent()
-        self.scenario = ScenarioAgent()
-        self.validator = ValidatorAgent()
-        self.narrator = NarratorAgent()
+        # Resolve the RAG layer at construction. Caller can inject `market_intel`
+        # (used by tests + FastAPI startup); otherwise we lazy-load the
+        # process-wide singleton if MARKET_INTEL_ENABLED is on.
+        self.market_intel = market_intel if market_intel is not None else _resolve_market_intel()
+        self.intake = IntakeAgent(mi=self.market_intel)
+        self.strategist = StrategistAgent(mi=self.market_intel)
+        self.pricing = PricingAgent(mi=self.market_intel)
+        self.scenario = ScenarioAgent(mi=self.market_intel)
+        self.validator = ValidatorAgent(mi=self.market_intel)
+        self.narrator = NarratorAgent(mi=self.market_intel)
 
     # ------------------------------------------------------------------
     # Session lifecycle
@@ -238,7 +261,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_INTAKE:
                 self._emit(session, "agent_started", "IntakeAgent")
-                session = self.intake.run(session)
+                session = self._run_agent(self.intake, session)
                 session.status = SessionStatus.AWAITING_GATE_A
                 self.store.update(session)
                 self._emit(session, "agent_finished", "IntakeAgent")
@@ -274,7 +297,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_STRATEGIST:
                 self._emit(session, "agent_started", "StrategistAgent")
-                session = self.strategist.run(session)
+                session = self._run_agent(self.strategist, session)
                 session.status = SessionStatus.AWAITING_GATE_B
                 self.store.update(session)
                 self._emit(session, "agent_finished", "StrategistAgent")
@@ -283,7 +306,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_PRICING:
                 self._emit(session, "agent_started", "PricingAgent")
-                session = self.pricing.run(session)
+                session = self._run_agent(self.pricing, session)
                 session.status = SessionStatus.PENDING_SCENARIO
                 self.store.update(session)
                 self._emit(session, "agent_finished", "PricingAgent")
@@ -291,7 +314,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_SCENARIO:
                 self._emit(session, "agent_started", "ScenarioAgent")
-                session = self.scenario.run(session)
+                session = self._run_agent(self.scenario, session)
                 session.status = SessionStatus.PENDING_VALIDATION
                 self.store.update(session)
                 self._emit(session, "agent_finished", "ScenarioAgent")
@@ -299,7 +322,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_VALIDATION:
                 self._emit(session, "agent_started", "ValidatorAgent")
-                session = self.validator.run(session)
+                session = self._run_agent(self.validator, session)
                 self._emit(session, "agent_finished", "ValidatorAgent")
                 if session.validator and session.validator.has_blockers:
                     if session.validator_retries < 2:
@@ -315,7 +338,7 @@ class OrchestratorAgent:
 
             if status == SessionStatus.PENDING_NARRATOR:
                 self._emit(session, "agent_started", "NarratorAgent")
-                session = self.narrator.run(session)
+                session = self._run_agent(self.narrator, session)
                 session.status = SessionStatus.AWAITING_GATE_C
                 self.store.update(session)
                 self._emit(session, "agent_finished", "NarratorAgent")
@@ -324,6 +347,34 @@ class OrchestratorAgent:
 
             # Unknown / terminal.
             return
+
+    # ------------------------------------------------------------------
+    # Agent runner — wraps every agent.run() call so we can emit any new
+    # `market_context` entries the agent appended to the session.
+    # ------------------------------------------------------------------
+
+    def _run_agent(self, agent: Any, session: StructuringSession) -> StructuringSession:
+        prev_len = len(session.market_context or [])
+        session = agent.run(session)
+        self._emit_new_market_context(session, prev_len)
+        return session
+
+    def _emit_new_market_context(
+        self, session: StructuringSession, prev_len: int
+    ) -> None:
+        ctx = session.market_context or []
+        for entry in ctx[prev_len:]:
+            self.store.emit(
+                session.session_id,
+                {
+                    "session_id": session.session_id,
+                    "type": "market_context",
+                    "status": session.status.value,
+                    "agent": entry.get("agent"),
+                    "intent": entry.get("intent"),
+                    "payload": entry,
+                },
+            )
 
     # ------------------------------------------------------------------
     # Regime build (Phase 1: minimal)

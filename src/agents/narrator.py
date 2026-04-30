@@ -12,7 +12,7 @@ Phase 4 layers an HTML/Jinja template on top for the polished memo.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.config.agent_config import get_agent_config
 
@@ -65,6 +65,12 @@ Constraints:
 class NarratorAgent(BaseAgent):
     name = "NarratorAgent"
 
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        # Narrator never queries MI — it stitches in upstream citations
+        # already captured on session.market_context. The kwarg exists for
+        # API parity with the other agents.
+        self.mi = mi
+
     def _run(self, session: StructuringSession) -> StructuringSession:
         if not session.priced:
             raise AgentError("NarratorAgent requires priced candidates.")
@@ -74,6 +80,8 @@ class NarratorAgent(BaseAgent):
         memo = self._compose_deterministic(session)
         # Optional LLM polish + recommendation. Falls back to the heuristic pick.
         self._polish_with_llm(memo, session)
+        # Stitch citations from upstream MI calls into the memo (no extra LLM).
+        self._append_market_context_citations(memo, session)
         session.memo = memo
         return session
 
@@ -281,6 +289,85 @@ class NarratorAgent(BaseAgent):
             if f.severity == Severity.WARN
         ]
         return warnings[:4]
+
+    # ------------------------------------------------------------------
+    # Market-intelligence citations
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _append_market_context_citations(
+        memo: MemoArtifact, session: StructuringSession
+    ) -> None:
+        """Append a 'Market Intelligence Citations' section to the memo.
+
+        Uses upstream `session.market_context` entries (populated by Intake /
+        Strategist / Pricing / Scenario / Validator). Renders both into a
+        Markdown section appended to the recommendation, and (when available)
+        into the rendered HTML.
+        """
+        entries = list(session.market_context or [])
+        if not entries:
+            return
+
+        lines = ["", "### Market Intelligence Citations", ""]
+        for i, e in enumerate(entries, start=1):
+            agent = e.get("agent", "?")
+            intent = e.get("intent", "?")
+            confidence = e.get("confidence", "?")
+            answer = (e.get("answer") or "").strip()
+            # Keep each citation tight — first 280 chars is enough to give the
+            # salesperson a defensible quote.
+            snippet = (answer[:280] + "…") if len(answer) > 280 else answer
+            sources = e.get("sources") or []
+            source_ids = ", ".join(
+                str(s.get("id"))
+                for s in sources
+                if isinstance(s, dict) and s.get("id")
+            )
+            lines.append(
+                f"{i}. **{agent}** ({intent}, confidence: {confidence})"
+                + (f" — sources: {source_ids}" if source_ids else "")
+            )
+            if snippet:
+                lines.append(f"   {snippet}")
+            lines.append("")
+
+        section_md = "\n".join(lines)
+        # Append to the recommendation paragraph so it lands at the bottom of
+        # the memo without disturbing the comparison table or per-candidate
+        # sections that the LLM polished.
+        memo.recommendation_md = (
+            (memo.recommendation_md or "").rstrip() + "\n\n" + section_md.strip() + "\n"
+        )
+
+        # If a rendered HTML is present, mirror the section there too.
+        if memo.rendered_html:
+            html_lines = [
+                "<section class='market-intel-citations'>",
+                "<h3>Market Intelligence Citations</h3>",
+                "<ol>",
+            ]
+            for e in entries:
+                agent = e.get("agent", "?")
+                intent = e.get("intent", "?")
+                confidence = e.get("confidence", "?")
+                answer = (e.get("answer") or "").strip()
+                snippet = (answer[:280] + "…") if len(answer) > 280 else answer
+                sources = e.get("sources") or []
+                source_ids = ", ".join(
+                    str(s.get("id"))
+                    for s in sources
+                    if isinstance(s, dict) and s.get("id")
+                )
+                html_lines.append(
+                    f"<li><strong>{agent}</strong> "
+                    f"<em>({intent}, confidence: {confidence})</em>"
+                    + (f" — sources: {source_ids}" if source_ids else "")
+                    + (f"<br>{snippet}" if snippet else "")
+                    + "</li>"
+                )
+            html_lines += ["</ol>", "</section>"]
+            memo.rendered_html = memo.rendered_html.rstrip() + "\n" + "\n".join(html_lines)
 
     # ------------------------------------------------------------------
     # Optional LLM polish

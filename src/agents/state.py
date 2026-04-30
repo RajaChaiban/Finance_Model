@@ -399,6 +399,15 @@ class StructuringSession(BaseModel):
     total_tokens_input: int = 0
     total_tokens_output: int = 0
 
+    # Market-intelligence (RAG) layer outputs. Each entry is a
+    # `QueryResponse.to_dict()` payload with two extra metadata fields the
+    # producing agent stamps on:
+    #   {"agent": "<AgentName>", "intent": "<market_window|pricing|deal_analysis|general>",
+    #    "answer": ..., "sources": [...], "confidence": ..., "metadata": {...}}
+    # The orchestrator drains new entries onto the SSE stream as
+    # `market_context` events; the Narrator reuses them as citations.
+    market_context: list[dict[str, Any]] = Field(default_factory=list)
+
     # Last error for surfaced UI display.
     last_error: Optional[str] = None
 

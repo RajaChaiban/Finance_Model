@@ -121,3 +121,46 @@ class BaseAgent(ABC):
                 payload=payload,
             ),
         )
+
+    # ------------------------------------------------------------------
+    # Market-intelligence helper
+    # ------------------------------------------------------------------
+
+    def _record_market_context(
+        self,
+        session: StructuringSession,
+        *,
+        intent: str,
+        qr,
+    ) -> None:
+        """Stamp agent + intent on a `QueryResponse` and append to the session.
+
+        The orchestrator drains new entries onto the SSE stream as
+        `market_context` events. The Narrator reads `session.market_context`
+        as citation material for the final memo.
+
+        ``qr`` is duck-typed as anything with a ``.to_dict()`` method (i.e.
+        ``MarketIntelligence.QueryResponse``) — we don't import the type here
+        to keep the heavy deps lazy.
+        """
+        if qr is None:
+            return
+        try:
+            payload = qr.to_dict()
+        except AttributeError:
+            return
+        # Skip empty/low-confidence retrievals that just say "no relevant docs".
+        # No point surfacing those to the user as citations.
+        if (
+            payload.get("confidence") == "low"
+            and not payload.get("sources")
+            and "no relevant" in str(payload.get("answer", "")).lower()
+        ):
+            return
+        session.market_context.append(
+            {
+                "agent": self.name,
+                "intent": intent,
+                **payload,
+            }
+        )

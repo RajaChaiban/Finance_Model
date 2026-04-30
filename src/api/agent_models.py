@@ -62,6 +62,7 @@ class SessionView(BaseModel):
     scenarios: list[dict[str, Any]] = Field(default_factory=list)
     validator: Optional[dict[str, Any]] = None
     memo: Optional[dict[str, Any]] = None
+    market_context: list[dict[str, Any]] = Field(default_factory=list)
     gate_a_decision: Optional[bool] = None
     gate_b_decision: Optional[bool] = None
     gate_c_decision: Optional[bool] = None

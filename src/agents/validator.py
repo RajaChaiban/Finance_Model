@@ -19,7 +19,8 @@ now, a static remediation template per rule is enough.
 from __future__ import annotations
 
 import logging
-from typing import Callable
+import re
+from typing import Any, Callable, Optional
 
 from .base import BaseAgent
 from .state import (
@@ -41,9 +42,25 @@ logger = logging.getLogger(__name__)
 MAX_STRIKE_OVER_SPOT = 5.0
 MAX_EXPIRY_DAYS = 5 * 365
 
+# Phrases in a deal-analysis answer that indicate the corpus found no clean
+# precedent for the proposed structure. Tuned conservatively — false positives
+# are cheap (a Gate C caveat); false negatives are the failure mode we care
+# about (an unusual structure shipping without a senior eye on it).
+_NO_PRECEDENT_PATTERNS = [
+    re.compile(r"\bno (?:clean |direct |close )?precedent\b", re.IGNORECASE),
+    re.compile(r"\bno comparable\b", re.IGNORECASE),
+    re.compile(r"\bunusual\b", re.IGNORECASE),
+    re.compile(r"\batypical\b", re.IGNORECASE),
+    re.compile(r"\boutlier\b", re.IGNORECASE),
+    re.compile(r"\bnot seen recently\b", re.IGNORECASE),
+]
+
 
 class ValidatorAgent(BaseAgent):
     name = "ValidatorAgent"
+
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        self.mi = mi
 
     def _run(self, session: StructuringSession) -> StructuringSession:
         report = ValidatorReport()
@@ -54,8 +71,66 @@ class ValidatorAgent(BaseAgent):
         for pc in session.priced:
             self._validate_candidate(pc.candidate, pc, session.regime, report)
 
+        # Market-comparable check (RAG). Adds WARN findings for outlier
+        # structures so they surface to the user at Gate C, but never BLOCK —
+        # absence of precedent isn't an arbitrage failure.
+        self._check_against_precedents(session, report)
+
         session.validator = report
         return session
+
+    # ------------------------------------------------------------------
+    # Market intelligence (precedent comparison)
+    # ------------------------------------------------------------------
+
+    def _check_against_precedents(
+        self,
+        session: StructuringSession,
+        report: ValidatorReport,
+    ) -> None:
+        if self.mi is None or session.objective is None or not session.priced:
+            return
+        underlying = session.objective.underlying
+        for pc in session.priced:
+            deal_summary = {
+                "structure": pc.candidate.name,
+                "kind": pc.candidate.kind.value,
+                "underlying": underlying,
+                "notional_usd": pc.candidate.notional_usd,
+                "horizon_days": (
+                    pc.candidate.legs[0].expiry_days if pc.candidate.legs else None
+                ),
+                "net_premium_bps": round(pc.net_premium_bps, 1),
+                "delta": round(pc.greeks.delta, 3),
+            }
+            try:
+                qr = self.mi.query_deal_analysis(
+                    deal_summary=deal_summary,
+                    asset_class=underlying,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Validator MI query_deal_analysis failed for %s: %s",
+                    pc.candidate.candidate_id,
+                    exc,
+                )
+                continue
+            self._record_market_context(session, intent="deal_analysis", qr=qr)
+
+            answer = getattr(qr, "answer", "") or ""
+            if any(p.search(answer) for p in _NO_PRECEDENT_PATTERNS):
+                report.findings.append(
+                    ValidatorFinding(
+                        name="market_precedent_outlier",
+                        severity=Severity.WARN,
+                        message=(
+                            "Corpus shows no close precedent for this structure / underlier. "
+                            "Senior structurer review recommended before quoting."
+                        ),
+                        candidate_id=pc.candidate.candidate_id,
+                        remediation="Surface at Gate C; consider a more conventional shape.",
+                    ),
+                )
 
     # ------------------------------------------------------------------
     # Per-candidate rule application

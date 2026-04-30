@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Optional
 
 from src.config.agent_config import get_agent_config
 
@@ -60,14 +60,45 @@ Rules:
 class IntakeAgent(BaseAgent):
     name = "IntakeAgent"
 
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        # `mi` is `Optional[MarketIntelligence]`; typed as Any so importing
+        # this module doesn't pull the heavy chromadb/sentence-transformers
+        # stack until MI is actually used.
+        self.mi = mi
+
     def _run(self, session: StructuringSession) -> StructuringSession:
         if session.intake_form:
             session.objective = self._from_form(session.intake_form, session.intake_nl)
-            return session
-        if session.intake_nl:
+        elif session.intake_nl:
             session.objective = self._from_nl(session.intake_nl)
-            return session
-        raise AgentError("Intake requires either intake_form or intake_nl.")
+        else:
+            raise AgentError("Intake requires either intake_form or intake_nl.")
+
+        # Enrich with grounded market context so Gate A reflects what the
+        # corpus knows about this underlying *before* the strategist runs.
+        self._enrich_with_market_context(session)
+        return session
+
+    # ------------------------------------------------------------------
+    # Market intelligence (free-form Q&A on the RFQ + ticker)
+    # ------------------------------------------------------------------
+
+    def _enrich_with_market_context(self, session: StructuringSession) -> None:
+        if self.mi is None or session.objective is None:
+            return
+        obj = session.objective
+        rfq = (obj.raw_rfq or session.intake_nl or "").strip()
+        # Compose a query that gives semantic search something to bite on.
+        query = (
+            f"{obj.underlying} {obj.view} {obj.horizon_days}d horizon. "
+            f"{rfq}"
+        ).strip()[:1000]
+        try:
+            qr = self.mi.general_query(query=query, asset_class=obj.underlying)
+        except Exception as exc:  # noqa: BLE001 — never fail intake on MI errors
+            logger.warning("Intake MI general_query failed: %s", exc)
+            return
+        self._record_market_context(session, intent="general", qr=qr)
 
     # ------------------------------------------------------------------
     # Form path (deterministic)

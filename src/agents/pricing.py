@@ -15,7 +15,7 @@ memo time.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from src.engines import router
 
@@ -36,6 +36,9 @@ logger = logging.getLogger(__name__)
 class PricingAgent(BaseAgent):
     name = "PricingAgent"
 
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        self.mi = mi
+
     def _run(self, session: StructuringSession) -> StructuringSession:
         if not session.candidates:
             raise AgentError("No candidates to price.")
@@ -47,7 +50,45 @@ class PricingAgent(BaseAgent):
             priced.append(self._price_candidate(cand, session.regime))
 
         session.priced = priced
+
+        # Pricing's RAG hook runs AFTER the QuantLib model price. The point
+        # is to overlay a market-spread narrative on the model number — the
+        # corpus tells us where comparable structures recently printed.
+        self._enrich_with_pricing_context(session, priced)
+
         return session
+
+    # ------------------------------------------------------------------
+    # Market intelligence (per-candidate pricing benchmark)
+    # ------------------------------------------------------------------
+
+    def _enrich_with_pricing_context(
+        self,
+        session: StructuringSession,
+        priced: list[PricedCandidate],
+    ) -> None:
+        if self.mi is None or session.objective is None or not priced:
+            return
+        underlying = session.objective.underlying
+        for pc in priced:
+            try:
+                qr = self.mi.query_pricing(
+                    asset_class=underlying,
+                    tranche_type=pc.candidate.kind.value,
+                    deal_size=pc.candidate.notional_usd,
+                    collateral_info={
+                        "structure_kind": pc.candidate.kind.value,
+                        "horizon_days": session.objective.horizon_days,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Pricing MI query_pricing failed for %s: %s",
+                    pc.candidate.candidate_id,
+                    exc,
+                )
+                continue
+            self._record_market_context(session, intent="pricing", qr=qr)
 
     # ------------------------------------------------------------------
     # Per-candidate
