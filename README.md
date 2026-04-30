@@ -1,181 +1,115 @@
-# S&P 500 Knockout Option Pricer
+# Vol Desk — Derivatives Pricing Platform
 
-A comprehensive educational and professional tool for pricing knockout (barrier) options on the S&P 500 using Black-Scholes formulas implemented from scratch, validated against QuantLib.
-
-## Overview
-
-This project implements a complete knockout option pricing model that:
-
-- **Fetches real market data** - S&P 500 prices and calculates historical volatility
-- **Implements Black-Scholes from scratch** - Pure Python implementation with heavy educational comments
-- **Prices knockout options** - Both calls and puts with barrier adjustments
-- **Calculates Greeks** - Delta, Gamma, Vega, Theta for risk analysis
-- **Validates against QuantLib** - Industry-standard comparison to ensure correctness
-- **Visualizes results** - Professional 4-panel charts showing payoffs and Greeks
-
-## What is a Knockout Option?
-
-A **knockout option** (also called a barrier option) is a standard call or put option that becomes **worthless** if the underlying asset's price hits a specified barrier level before expiration.
-
-### Key Features:
-- **Cheaper than vanilla options** - The seller is protected if the barrier is breached
-- **Path-dependent** - The option value depends on whether the barrier is hit, not just final price
-- **Practical use** - Used for hedging with lower costs or as speculation with leverage constraints
-
-### Example:
-- **Knockout Call**: Buy call at S&P=4500 (strike), but it dies if S&P falls to 4050 (10% barrier)
-- **Knockout Put**: Buy put for downside protection, but it expires if S&P rallies to 4950
-
-## Project Structure
+A FastAPI + React vol-desk platform for pricing equity options against a calibrated implied-vol surface, with a multi-agent structuring co-pilot layered on top.
 
 ```
-Finance_Model/
-├── Knockout_Option_Pricer_SP500.ipynb   # Main notebook (8 cells)
-├── docs/
-│   └── superpowers/
-│       ├── plans/
-│       │   └── 2026-04-24-knockout-pricer.md      # Implementation plan
-│       └── specs/
-└── README.md
+Vol Desk Platform
+├── Market intelligence layer    Live indices, top movers, HV30 ranking
+├── Quick Pricer                 8 vanilla/barrier/Asian/lookback products via QuantLib
+└── Structuring Co-pilot         7-agent planner+specialists workflow (Gemini-driven)
 ```
 
-## Getting Started
+## What's in here
 
-### Google Colab (Recommended)
+| Layer | Stack | Where |
+|---|---|---|
+| Pricing engines | QuantLib 1.42, NumPy, SciPy | `src/engines/` |
+| FastAPI backend | FastAPI, Pydantic, Uvicorn | `src/api/` (port **8002**) |
+| Vol-surface build | yfinance option chain → IV grid → `BlackVarianceSurface` | `src/data/` |
+| Agentic co-pilot | Pydantic state machine, Gemini SDK, SSE streaming | `src/agents/` |
+| Frontend | React 19, TypeScript, Vite 8, recharts 3 | `frontend/src/` (port **5173**) |
+| Reports | Jinja2 HTML | `src/report/` → `reports/` |
+| Tests | pytest (1202 tests), Playwright e2e | `tests/`, `frontend/tests/` |
 
-1. Open [Google Colab](https://colab.research.google.com)
-2. Click "File → Open notebook → GitHub"
-3. Search for this repository
-4. Click on `Knockout_Option_Pricer_SP500.ipynb`
-5. Run all cells (Ctrl+F9)
+## Supported products
 
-### Local Jupyter
+The router (`src/engines/router.py`) dispatches 12 product types. QuantLib is the primary engine; the no-QL fallbacks exist mainly for portability.
+
+| Product | Engine | Notes |
+|---|---|---|
+| `european_call/put` | `ql.AnalyticEuropeanEngine` | Closed-form |
+| `american_call/put` | `ql.BinomialVanillaEngine` (LR tree) | MC LSM fallback |
+| `knockout_call/put` | `ql.AnalyticBarrierEngine` (or FDM-LV under smile) | BGK shift for discrete monitoring |
+| `knockin_call/put` | `ql.AnalyticBarrierEngine` (DnIn/UpIn) | KO+KI=Vanilla parity verified |
+| `asian_call/put` | Geometric: closed-form. Arithmetic: MC + geometric control variate | `src/engines/asian.py` |
+| `lookback_call/put` | `ql.AnalyticContinuousFloating/FixedLookbackEngine` | Fixed and floating strike |
+
+Smile-aware pricing (`use_vol_surface=true`) calibrates a live `BlackVarianceSurface` from the option chain and forces FDM-with-local-vol for barriers (the analytic engine collapses the smile to a scalar and mis-prices the knock-probability term).
+
+## Quick start
 
 ```bash
-# Clone the repo
-git clone <repo-url>
-cd Finance_Model
+# 1. Install
+pip install -r requirements.txt
+cp .env.example .env   # add GEMINI_API_KEY if you want the co-pilot
 
-# Install dependencies
-pip install numpy scipy pandas matplotlib yfinance QuantLib
+# 2. Backend (port 8002)
+python -m uvicorn src.api.main:app --reload --port 8002
 
-# Open notebook
-jupyter notebook Knockout_Option_Pricer_SP500.ipynb
+# 3. Frontend (port 5173)
+cd frontend
+npm install
+npm run dev
+
+# 4. Browse
+open http://localhost:5173
 ```
 
-## Notebook Structure
+### CLI batch pricing (no UI)
 
-| Cell | Topic | Key Content |
-|------|-------|------------|
-| 1 | Setup | Imports: NumPy, SciPy, yfinance, QuantLib |
-| 2 | Theory | Black-Scholes formula, Greeks, barrier adjustments |
-| 3 | Data | Fetch S&P 500 data, calculate volatility |
-| 4 | Pricing | Black-Scholes implementation from scratch |
-| 5 | Greeks | Delta, Gamma, Vega, Theta calculations |
-| 6 | Charts | 4-panel visualization (payoffs + Greeks) |
-| 7 | Validation | Compare manual implementation vs QuantLib |
-| 8 | Summary | Key formulas, insights, and next steps |
-
-## Key Formulas
-
-### Black-Scholes Call Price
-```
-C = S₀×N(d₁) - K×e^(-rT)×N(d₂)
-
-where:
-d₁ = [ln(S₀/K) + (r + σ²/2)T] / (σ√T)
-d₂ = d₁ - σ√T
+```bash
+python main.py --config configs/american_put_spy.yaml --fetch-market-data
+python main.py --config configs/knockout_call_spy.yaml --use-vol-surface
 ```
 
-### Knockout Adjustment
+## API surface
+
+Backend (`src/api/main.py`):
+
+- `GET /health`
+- `GET /api/market/spot-price?ticker=…`
+- `GET /api/market/dividend-yield?ticker=…`
+- `GET /api/market/risk-free-rate?days_to_expiration=…`
+- `GET /api/market/historical-volatility?ticker=…&lookback_days=…`
+- `GET /api/market/dividend-info?ticker=…`
+- `GET /api/market/movers?universe=default` — Vol Desk dashboard payload (60s cache)
+- `POST /api/price` — full pricing + Greeks + HTML report
+
+Agent router (`src/api/agent_router.py`, mounted at `/api/agent/*`):
+
+- `POST /api/agent/sessions` — start session (Intake)
+- `GET /api/agent/sessions/{id}` — current state view
+- `POST /api/agent/sessions/{id}/gate/{a|b|c}` — HITL gate decision
+- `GET /api/agent/sessions/{id}/events` — SSE stream
+
+## Testing
+
+```bash
+python -m pytest tests/                # ~1202 backend tests, ~25s
+cd frontend && npx playwright test     # 2 e2e specs (pricing-pipeline + vol-desk-platform)
 ```
-Knockout Price = Vanilla Price × (B/S)^(2λ-1)
 
-where:
-λ = (r + σ²/2) / σ²
-B = Barrier level
-S = Current spot price
-```
+Coverage layers: parity/no-arb identities, closed-form references (BS, Reiner-Rubinstein, geometric Asian), convention checks (Vega per 1%, Theta per day, BGK shift), and full pipeline smoke (`test_pipeline_with_structurer.py`, `test_agents_smoke.py`).
 
-## The Greeks
+## Documentation
 
-| Greek | Symbol | Meaning | Use Case |
-|-------|--------|---------|----------|
-| Delta | Δ | Price change per $1 stock move | Directional exposure |
-| Gamma | Γ | Rate of delta change | Hedging frequency |
-| Vega | ν | Price change per 1% volatility | Volatility bets |
-| Theta | Θ | Daily time decay | Cost of holding |
+- **`architecture.md`** — full pipeline diagram, engine routing, smile-aware pricing, Greeks conventions, agent layer
+- **`SETUP.md`** — install, env vars, troubleshooting
+- **`QUANTLIB_INTEGRATION.md`** — QL migration history and engine choice rationale
+- **`SOLVER_COMPONENT.md`** — implied-vol solver internals
+- **`CLAUDE.md`** — directory map and search guidance for AI agents working in this repo
+- **`docs/superpowers/specs/`** — design specs for major features (e.g. Vol Desk platform UI)
+- **`docs/superpowers/plans/`** — implementation plans
+- **`raja_notes/`** — learning notes (gitignored, local only)
 
-## Technologies Used
+## Project status
 
-- **NumPy/SciPy** - Numerical computing and statistical distributions
-- **Pandas** - Data manipulation and analysis
-- **Matplotlib** - Professional data visualization
-- **yfinance** - Real S&P 500 market data
-- **QuantLib** - Industry-standard derivatives pricing library
-
-## Parameters
-
-The notebook uses these default parameters (easily adjustable):
-
-- **Underlying**: S&P 500 (^GSPC) - yesterday's close
-- **Strike**: At-the-money (= spot price)
-- **Barrier (Call)**: 10% below spot
-- **Barrier (Put)**: 10% above spot
-- **Volatility**: Historical (1-year annualized)
-- **Time to Expiration**: 90 days (3 months)
-- **Risk-free Rate**: 4.5% (Treasury yield)
-- **Dividend Yield**: 1.5% (S&P average)
-
-## Output Examples
-
-When you run the notebook, you'll see:
-
-1. **Data Summary** - S&P 500 spot price, volatility, data completeness
-2. **Pricing Results** - Vanilla vs knockout prices for calls and puts
-3. **Greeks Table** - All sensitivities side-by-side
-4. **Visualization** - 4 professional charts
-5. **Validation** - Manual vs QuantLib comparison (differences < 1%)
-
-## Next Steps / Extensions
-
-This foundation can be extended to:
-
-- **Scenario Analysis** - Test different barrier levels, volatilities, time horizons
-- **Deleveraging Simulation** - Model portfolio forced-selling scenarios
-- **Web UI** - React/Flask interface for configuration and results
-- **Backend API** - FastAPI service for automated pricing
-- **Risk Reports** - Daily Greeks updates, hedge ratio calculations
-- **Monte Carlo** - Simulate paths and calculate breach probabilities
-- **Other Underlyings** - Extend to individual stocks, indices, FX pairs
-
-## Educational Value
-
-This project teaches:
-
-- ✓ **Quantitative Finance** - Black-Scholes theory and implementation
-- ✓ **Derivatives Pricing** - Barrier options and adjustments
-- ✓ **Risk Management** - Greeks and hedging strategies
-- ✓ **Python for Finance** - NumPy, SciPy, QuantLib
-- ✓ **Data Science** - Fetching, calculating, and visualizing financial data
-- ✓ **Validation Techniques** - Comparing custom implementations to industry standards
-
-## Who This Is For
-
-- **Finance Professionals** - Traders, quants, risk managers
-- **Students** - Learning derivatives pricing and risk management
-- **VPs/Decision Makers** - Proof-of-concept for pricing engines
-- **Engineers** - Building financial software or ML models on top
+- **1202** backend tests passing
+- Production-grade QuantLib integration (binomial, FDM-LV, analytic barrier, lookback, Asian)
+- Smile-aware pricing with live SPY surface calibration
+- 7-agent structuring co-pilot (Intake → Strategist → Pricing → Scenario → Validator → Narrator with HITL gates)
+- Vol Desk platform UI (live movers, mode switcher, payoff chart, Greeks bar)
 
 ## License
 
-MIT - Free to use and modify
-
-## Contact
-
-Built by RajaChaiban | rajachaiban@gmail.com
-
----
-
-**Last Updated**: April 24, 2026  
-**Status**: Production-ready for educational and professional use
+MIT — built by RajaChaiban (rajachaiban@gmail.com).
