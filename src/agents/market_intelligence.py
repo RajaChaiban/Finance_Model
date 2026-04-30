@@ -489,10 +489,11 @@ class MarketIntelligence:
             - "deal"               (a comparable deal)
             - "market_window"      (a market-window note for an asset class)
             - "pricing_benchmark"  (a pricing benchmark)
+            - "macro"              (FRED-sourced macro observations)
             - any free-form string falls through to general_query
 
         Recognised asset_class values are free-form (e.g. "CLO", "RMBS",
-        "CMBS", "ABS"). Match what your agents pass in.
+        "CMBS", "ABS", "MACRO"). Match what your agents pass in.
         """
         docs: List[Document] = []
         for raw in items:
@@ -501,6 +502,39 @@ class MarketIntelligence:
             metadata = {k: v for k, v in raw.items() if k not in ("id", "content")}
             docs.append(Document(id=raw["id"], content=raw["content"], metadata=metadata))
         self.vector_store.add_documents(docs)
+
+    def seed_from_fred(
+        self,
+        api_key: Optional[str] = None,
+        series: Optional[Sequence[Any]] = None,
+    ) -> int:
+        """Pull macro series from FRED and seed them into the vector store.
+
+        Wraps :func:`src.data.fred_ingester.fetch_fred_documents` so a host
+        app can wire FRED → MI in one call. Safe to call repeatedly: each
+        observation's doc id includes its date, so re-running the same day
+        is a no-op against Chroma's upsert semantics.
+
+        Args:
+            api_key: FRED API key. Falls back to ``FRED_API_KEY`` env var.
+            series: Optional override for the curated series list. ``None``
+                means use :data:`DEFAULT_FRED_SERIES`.
+
+        Returns:
+            Number of documents successfully seeded. ``0`` when the key is
+            missing or every fetch failed.
+        """
+        from src.data.fred_ingester import fetch_fred_documents, DEFAULT_FRED_SERIES
+
+        docs = fetch_fred_documents(
+            api_key=api_key,
+            series=series if series is not None else DEFAULT_FRED_SERIES,
+        )
+        if not docs:
+            return 0
+        self.seed_from_dicts(docs)
+        logger.info(f"Seeded {len(docs)} FRED macro documents into MI corpus")
+        return len(docs)
 
     def count(self) -> int:
         return self.vector_store.count()
@@ -769,6 +803,16 @@ def get_market_intelligence() -> Optional["MarketIntelligence"]:
             collection_name=cfg.market_intel_collection,
             embeddings_model=cfg.market_intel_embeddings_model,
         )
+
+        # Auto-seed FRED macro corpus if a key is configured. Failure is
+        # non-fatal — MI still serves whatever is already in the store.
+        if cfg.fred_api_key:
+            try:
+                seeded = _GLOBAL_MI.seed_from_fred(api_key=cfg.fred_api_key)
+                logger.info(f"MarketIntelligence: FRED auto-seed added {seeded} docs")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(f"FRED auto-seed failed: {exc}")
+
         return _GLOBAL_MI
     except Exception as exc:  # noqa: BLE001
         # Heavy deps (chromadb, sentence-transformers) might not be installed
