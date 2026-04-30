@@ -115,7 +115,13 @@
       "Bash(curl -s -X POST http://127.0.0.1:8003/api/agent/sessions/__TRACKED_VAR__/gate/b -H 'Content-Type: application/json' -d '{\"approved\":true}')",
       "Bash(curl -s -X POST http://127.0.0.1:8003/api/agent/sessions/__TRACKED_VAR__/gate/c -H 'Content-Type: application/json' -d '{\"approved\":true}')",
       "Bash(curl *)",
-      "Bash(awk -F/ '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^gemini/\\) print $i, $NF}')"
+      "Bash(awk -F/ '{for\\(i=1;i<=NF;i++\\) if\\($i ~ /^gemini/\\) print $i, $NF}')",
+      "Bash(xargs ls *)",
+      "Bash(pytest tests/ -q)",
+      "Bash(pytest tests/ -q --co)",
+      "Bash(python -m uvicorn src.api.main:app --port 8002 --host 127.0.0.1)",
+      "Bash(echo \"uvicorn PID: $!\")",
+      "Bash(echo \"vite PID: $!\")"
     ]
   }
 }
