@@ -166,9 +166,17 @@ export function CopilotPanel() {
         </div>
       )}
 
-      {error && (
-        <div className="copilot-error">
-          <strong>Error:</strong> {error}
+      {(error || session?.last_error) && (
+        <div className="copilot-error" data-testid="copilot-error-banner">
+          <strong>Error:</strong> {error || session?.last_error}
+          {session?.last_error?.includes("RESOURCE_EXHAUSTED") && (
+            <p className="copilot-error-hint">
+              The configured LLM provider is out of credits. Restart the backend with{" "}
+              <code>LLM_PROVIDER=mock</code> or <code>DEMO_REPLAY=1</code> to keep
+              demoing, or switch to <code>LLM_PROVIDER=anthropic</code> /{" "}
+              <code>LLM_PROVIDER=openai</code> with the matching API key set.
+            </p>
+          )}
         </div>
       )}
 

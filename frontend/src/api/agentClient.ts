@@ -6,13 +6,9 @@
  * exposed at /api/agent/sessions/{id}/events.
  */
 
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL ||
-  (() => {
-    const protocol = window.location.protocol;
-    const hostname = window.location.hostname;
-    return `${protocol}//${hostname}:8003`;
-  })();
+import { getApiBaseUrl } from "./baseUrl";
+
+const API_BASE_URL = getApiBaseUrl();
 
 export interface IntakeForm {
   underlying: string;

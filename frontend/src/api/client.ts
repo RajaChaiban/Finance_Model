@@ -2,12 +2,10 @@
  * API client for communicating with FastAPI backend.
  */
 
+import { getApiBaseUrl } from "./baseUrl";
+
 // Dynamically set API URL - defaults to localhost:8002, but can be overridden with VITE_API_URL env var
-const API_BASE_URL = import.meta.env.VITE_API_URL || (() => {
-  const protocol = window.location.protocol;
-  const hostname = window.location.hostname;
-  return `${protocol}//${hostname}:8002`;
-})();
+const API_BASE_URL = getApiBaseUrl();
 
 export interface PricingRequest {
   option_type: string;
