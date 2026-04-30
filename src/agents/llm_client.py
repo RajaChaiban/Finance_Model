@@ -99,9 +99,16 @@ class LLMClient:
             self._load_replay_cache()
             return
 
-        if not self.cfg.gemini_api_key:
+        # When LLM_PROVIDER is explicitly set to a non-Gemini backend
+        # (anthropic, openai, claude_code, mock), the Gemini API key is not
+        # required — we just need that provider's own auth.
+        configured_provider = os.getenv("LLM_PROVIDER", "gemini").lower().strip()
+        non_gemini = configured_provider not in {"gemini", ""}
+
+        if not non_gemini and not self.cfg.gemini_api_key:
             logger.warning(
-                "GEMINI_API_KEY not set. LLM calls will raise unless DEMO_REPLAY=1."
+                "GEMINI_API_KEY not set. LLM calls will raise unless DEMO_REPLAY=1 "
+                "or LLM_PROVIDER is set to a non-Gemini backend."
             )
             return
 
@@ -201,6 +208,58 @@ class LLMClient:
             res = self._replay(key)
             logger.debug("DEMO_REPLAY %s -> %s", key, "hit" if res.text else "miss")
             return res
+
+        # Non-Gemini providers (Anthropic, OpenAI, ClaudeCode, Mock) take a
+        # single text prompt and return text. Token / cost tracking is best-
+        # effort because each backend's response shape differs.
+        if self._provider is not None and not isinstance(self._provider, GeminiProvider):
+            system_text = self._coerce_system(system)
+            user_text = self._coerce_messages(messages)
+            full_prompt = (
+                f"{system_text}\n\n{user_text}" if system_text else user_text
+            )
+            if json_mode:
+                full_prompt += (
+                    "\n\nReply with valid JSON only. No prose, no code fences."
+                )
+            mt = max_tokens or self.cfg.max_output_tokens
+
+            last_err: Optional[Exception] = None
+            for attempt in range(self.cfg.max_retries + 1):
+                try:
+                    start = time.time()
+                    text = self._provider.complete(
+                        full_prompt, model=model, max_tokens=mt
+                    )
+                    latency = time.time() - start
+                    parsed = self._safe_json(text) if (json_mode and text) else None
+                    return LLMResult(
+                        text=text or "",
+                        parsed_json=parsed,
+                        tool_calls=[],
+                        stop_reason="STOP",
+                        model=model,
+                        latency_s=latency,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    last_err = exc
+                    if attempt >= self.cfg.max_retries:
+                        break
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "%s LLM call failed via %s (attempt %d/%d): %s. Retrying in %ds.",
+                        agent_name,
+                        self._provider.name,
+                        attempt + 1,
+                        self.cfg.max_retries + 1,
+                        exc,
+                        wait,
+                    )
+                    time.sleep(wait)
+            raise RuntimeError(
+                f"{agent_name} LLM call exhausted retries via "
+                f"{self._provider.name}: {last_err}"
+            ) from last_err
 
         if self._client is None or self._types is None:
             raise LLMUnavailableError(
