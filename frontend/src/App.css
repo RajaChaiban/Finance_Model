@@ -5,45 +5,47 @@
 }
 
 /* ============================================================
-   Design tokens — dark institutional theme
+   Design tokens — Azure Vol Desk light theme
+   Sky-azure primary on white / slate-50 surfaces.
+   Generated via Stitch design system asset 16771735188229378415.
    ============================================================ */
 :root {
-  /* Surfaces */
-  --bg-base: #0b0d14;
-  --bg-surface: #14171f;
-  --bg-elevated: #1c2030;
-  --bg-input: #0f1219;
-  --bg-hover: #232838;
+  /* Surfaces — white + slate-50 with light sky tints */
+  --bg-base: #F8FAFC;        /* slate-50 page background */
+  --bg-surface: #FFFFFF;     /* white cards */
+  --bg-elevated: #F1F5F9;    /* slate-100 inset / nested */
+  --bg-input: #FFFFFF;       /* white inputs */
+  --bg-hover: #E0F2FE;       /* sky-100 hover */
 
   /* Borders */
-  --border: #262a36;
-  --border-strong: #343a4a;
-  --border-focus: #8b5cf6;
+  --border: #E2E8F0;         /* slate-200 */
+  --border-strong: #CBD5E1;  /* slate-300 */
+  --border-focus: #0EA5E9;   /* sky-500 */
 
   /* Text */
-  --text-primary: #e7e9ee;
-  --text-secondary: #a8aebb;
-  --text-muted: #6b7280;
-  --text-inverse: #0b0d14;
+  --text-primary: #0F172A;   /* slate-900 */
+  --text-secondary: #475569; /* slate-600 */
+  --text-muted: #94A3B8;     /* slate-400 */
+  --text-inverse: #FFFFFF;
 
-  /* Brand */
-  --accent: #8b5cf6;
-  --accent-hover: #a78bfa;
-  --accent-soft: rgba(139, 92, 246, 0.12);
-  --accent-glow: rgba(139, 92, 246, 0.35);
-  --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%);
+  /* Brand — sky-azure */
+  --accent: #0EA5E9;         /* sky-500 */
+  --accent-hover: #38BDF8;   /* sky-400 */
+  --accent-soft: rgba(14, 165, 233, 0.10);
+  --accent-glow: rgba(14, 165, 233, 0.28);
+  --accent-gradient: linear-gradient(135deg, #38BDF8 0%, #0EA5E9 50%, #0284C7 100%);
 
   /* Status */
-  --success: #10b981;
+  --success: #10B981;
   --success-soft: rgba(16, 185, 129, 0.12);
-  --danger: #ef4444;
-  --danger-soft: rgba(239, 68, 68, 0.12);
-  --warning: #f59e0b;
+  --danger: #F43F5E;
+  --danger-soft: rgba(244, 63, 94, 0.10);
+  --warning: #F59E0B;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55);
+  /* Shadows — soft, light theme */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px rgba(14, 165, 233, 0.08), 0 1px 3px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 12px 32px rgba(14, 165, 233, 0.12), 0 2px 6px rgba(15, 23, 42, 0.06);
   --shadow-focus: 0 0 0 3px var(--accent-soft);
 
   --radius-sm: 6px;
@@ -52,7 +54,7 @@
 
   --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -72,7 +74,7 @@ body {
   display: flex;
   flex-direction: column;
   background:
-    radial-gradient(ellipse at top, rgba(139, 92, 246, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at top, rgba(14, 165, 233, 0.10) 0%, transparent 55%),
     var(--bg-base);
 }
 
@@ -92,8 +94,8 @@ body {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 20% 30%, rgba(139, 92, 246, 0.12) 0%, transparent 45%),
-    radial-gradient(circle at 80% 70%, rgba(99, 102, 241, 0.08) 0%, transparent 45%);
+    radial-gradient(circle at 20% 30%, rgba(14, 165, 233, 0.14) 0%, transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(125, 211, 252, 0.18) 0%, transparent 45%);
   pointer-events: none;
 }
 
@@ -375,7 +377,7 @@ body {
 
 .form-group select {
   appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23a8aebb' viewBox='0 0 16 16'%3e%3cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592c.859 0 1.319 1.013.753 1.659l-4.796 5.48a1 1 0 01-1.506 0z'/%3e%3c/svg%3e");
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23475569' viewBox='0 0 16 16'%3e%3cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592c.859 0 1.319 1.013.753 1.659l-4.796 5.48a1 1 0 01-1.506 0z'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: right 14px center;
   padding-right: 36px;
@@ -419,9 +421,9 @@ body {
 .error-box {
   padding: 12px 16px;
   background: var(--danger-soft);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  border: 1px solid rgba(244, 63, 94, 0.3);
   border-radius: var(--radius-md);
-  color: #fca5a5;
+  color: #BE123C;
   font-size: 0.9rem;
 }
 
@@ -609,7 +611,7 @@ body {
   color: var(--text-primary);
 }
 
-/* The pricing report ships with its own light styles — invert them */
+/* The pricing report ships with its own light styles — keep them aligned */
 .report-html h1,
 .report-html h2,
 .report-html h3,
@@ -629,7 +631,7 @@ body {
 }
 
 .report-html th {
-  background: var(--bg-surface) !important;
+  background: var(--bg-elevated) !important;
   color: var(--text-primary) !important;
   border-color: var(--border) !important;
 }
@@ -1107,7 +1109,7 @@ body {
 }
 
 /* ============================================================
-   Vol Desk — top platform layer
+   Azure Vol Desk — top platform layer
    Header • Index ticker strip • Movers grid • Charts
    ============================================================ */
 
@@ -1116,7 +1118,7 @@ body {
   position: sticky;
   top: 0;
   z-index: 30;
-  background: rgba(11, 13, 20, 0.85);
+  background: rgba(255, 255, 255, 0.85);
   backdrop-filter: saturate(180%) blur(8px);
   -webkit-backdrop-filter: saturate(180%) blur(8px);
   border-bottom: 1px solid var(--border);

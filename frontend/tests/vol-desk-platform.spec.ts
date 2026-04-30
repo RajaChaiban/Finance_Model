@@ -35,14 +35,14 @@ async function waitForFormReady(page: Page) {
   );
 }
 
-test.describe("Vol Desk — header & status pill", () => {
+test.describe("Azure Vol Desk — header & status pill", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
   });
 
   test("header renders with brand mark and clock", async ({ page }) => {
     await expect(page.getByTestId("vd-header")).toBeVisible();
-    await expect(page.getByText(/^Vol Desk$/)).toBeVisible();
+    await expect(page.getByText(/^Azure Vol Desk$/)).toBeVisible();
     // Status pill is one of two states.
     const pill = page.locator(".vd-status-pill");
     await expect(pill).toBeVisible();
