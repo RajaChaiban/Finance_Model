@@ -21,3 +21,10 @@ reportlab>=4.0
 chromadb>=0.4
 sentence-transformers>=2.2
 loguru>=0.7
+
+# Goldman Sachs gs_quant — optional second pricing engine.
+# Local features (instrument builders, BlackScholes, payoffs) work without
+# any account. Cloud pricing / live curves require Marquee credentials
+# (GS_MARQUEE_CLIENT_ID / GS_MARQUEE_CLIENT_SECRET). See
+# src/engines/gs_quant_engine.py and route_with_engine(engine="gs").
+gs-quant>=1.0

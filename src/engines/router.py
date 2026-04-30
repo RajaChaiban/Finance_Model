@@ -271,12 +271,15 @@ def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable,
     For american_*, engine='mc' forces monte_carlo_lsm regardless of QL.
     engine='analytic'|'tree'|'fdm' collapse to the QL default for now
     (reserved for future explicit per-engine routing in later phases).
+    engine='gs' routes European call/put through the gs_quant adapter
+    (requires Marquee credentials — see src/engines/gs_quant_engine.py).
 
     Returns:
         (pricer_func, greeks_func, description)
 
     Raises:
-        ValueError: If engine is not a recognised selector.
+        ValueError: If engine is not a recognised selector OR if 'gs' is
+            requested for a product the gs adapter doesn't yet support.
     """
     if engine == "auto":
         return route(option_type)
@@ -298,10 +301,32 @@ def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable,
 
         return pricer, greeks, "Monte Carlo LSM (American, forced)"
 
+    if engine == "gs":
+        if option_type not in ("european_call", "european_put"):
+            raise ValueError(
+                f"engine='gs' currently supports european_call / european_put only; "
+                f"got option_type={option_type!r}. Other products fall back to QuantLib."
+            )
+        from . import gs_quant_engine
+
+        opt = option_type.split("_")[1]
+
+        def pricer(S, K, r, sigma, T, q, **kwargs):
+            return gs_quant_engine.price_european_gs(
+                S, K, r, sigma, T, q, option_type=opt, **kwargs,
+            )
+
+        def greeks(S, K, r, sigma, T, q, **kwargs):
+            return gs_quant_engine.greeks_european_gs(
+                S, K, r, sigma, T, q, option_type=opt, **kwargs,
+            )
+
+        return pricer, greeks, "gs_quant Marquee (European, server-side)"
+
     if engine in ("analytic", "tree", "fdm"):
         # Phase 1: these all collapse to the QL default for now.
         return route(option_type)
 
     raise ValueError(
-        f"Unknown engine: {engine!r}. Valid values: auto|analytic|tree|mc|fdm"
+        f"Unknown engine: {engine!r}. Valid values: auto|analytic|tree|mc|fdm|gs"
     )
