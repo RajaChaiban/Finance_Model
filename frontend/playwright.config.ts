@@ -3,8 +3,8 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Playwright config for the derivatives pricer end-to-end tests.
  *
- * Assumes the FastAPI backend is already running on :8003 (see
- * `python -m uvicorn src.api.main:app --port 8003`). Vite dev server is
+ * Assumes the FastAPI backend is already running on :8002 (see
+ * `python -m uvicorn src.api.main:app --port 8002`). Vite dev server is
  * started by Playwright via `webServer` below.
  *
  * Run:    npx playwright test

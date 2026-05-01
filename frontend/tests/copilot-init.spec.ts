@@ -59,8 +59,11 @@ test.describe("Co-pilot init — port consistency", () => {
 
     // Wait for the session lane to appear (always rendered once a session
     // exists, regardless of success or backend error).
+    // Session creation runs the IntakeAgent synchronously inside POST
+    // /api/agent/sessions, which can take 30+s for a live LLM call. Allow
+    // enough margin so this isn't flaky.
     const sessionLane = page.getByRole("heading", { name: /① Intake/ }).first();
-    await expect(sessionLane).toBeVisible({ timeout: 30_000 });
+    await expect(sessionLane).toBeVisible({ timeout: 90_000 });
 
     // If the backend errored (e.g. LLM out of credits), the banner must
     // surface a non-empty message — proving last_error reaches the UI rather

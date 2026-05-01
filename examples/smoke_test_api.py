@@ -5,15 +5,16 @@ knockout call/put, asian call/put, lookback call/put) and prints the
 resulting price + Greeks. Sanity-checks that all router paths are reachable
 from the API layer with no exceptions.
 
-Note: URL hardcoded to 8001 here is a pre-existing pin (the backend
-default in src/api/main.py is 8002). To use against the standard port,
-edit URL locally; not patched in this commit to keep scope tight.
+Backend port matches src/api/main.py (8002). Override via env var if needed:
+
+    URL=http://127.0.0.1:9000/api/price python examples/smoke_test_api.py
 """
 
 import json
+import os
 import urllib.request
 
-URL = "http://127.0.0.1:8001/api/price"
+URL = os.environ.get("URL", "http://127.0.0.1:8002/api/price")
 
 CASES = [
     {

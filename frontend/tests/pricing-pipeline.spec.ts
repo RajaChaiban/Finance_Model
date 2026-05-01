@@ -13,9 +13,10 @@ import { test, expect, Page } from "@playwright/test";
  * Numerical correctness lives in the Python pytest suite — this file is the
  * UI contract test.
  *
- * Prereq: FastAPI backend on :8003.
+ * Prereq: FastAPI backend on :8002 (the canonical port — matches
+ * src/api/main.py and frontend/src/api/client.ts).
  *
- *     python -m uvicorn src.api.main:app --port 8003
+ *     python -m uvicorn src.api.main:app --port 8002
  */
 
 const PRODUCTS: Array<{
@@ -137,9 +138,34 @@ test.describe("Frontend ↔ Backend wiring (all 8 option types)", () => {
     // Use a near-the-money barrier so KI is non-trivial.
     const NEAR_BARRIER = { call: 0.95, put: 1.05 }; // multiplier on spot
 
+    // Locate the spot input by label (same pattern as setBarrier) so we
+    // never confuse it with strike, days, or any other > 50 numeric field.
+    const spotInput = page
+      .locator("label", { hasText: "Spot Price" })
+      .locator("xpath=..//input[@type='number']");
+
+    // Wait for the auto-fetched spot to land (>50 means yfinance returned).
+    await expect.poll(
+      async () => parseFloat(await spotInput.inputValue()),
+      { timeout: 30_000 },
+    ).toBeGreaterThan(50);
+
+    const lockedSpot = parseFloat(await spotInput.inputValue());
+    const B = Math.round(lockedSpot * NEAR_BARRIER.call);
+
     async function runOne(type: string, barrier: number | null) {
       await setOptionType(page, type);
       if (barrier !== null) await setBarrier(page, barrier);
+      // Pin spot to the locked value so all three sub-runs price on identical
+      // input. Without this, clickNewScenario() between sub-runs re-triggers
+      // the yfinance auto-fetch and the spot drifts a few cents → parity
+      // fails to within 0.005 even though the engine itself is exact.
+      await expect.poll(
+        async () => parseFloat(await spotInput.inputValue()),
+        { timeout: 30_000 },
+      ).toBeGreaterThan(50);
+      await spotInput.fill(String(lockedSpot));
+
       const respPromise = page.waitForResponse(
         (r) =>
           r.url().includes("/api/price") &&
@@ -153,18 +179,6 @@ test.describe("Frontend ↔ Backend wiring (all 8 option types)", () => {
       await clickNewScenario(page);
       return data.price as number;
     }
-
-    // Read spot from the form to choose a meaningful barrier.
-    const spot = await page.evaluate(() => {
-      const inputs = document.querySelectorAll<HTMLInputElement>("input[type=number]");
-      for (const i of inputs) {
-        const v = parseFloat(i.value);
-        if (v > 50) return v; // first sensibly-sized number → spot
-      }
-      return null;
-    });
-    expect(spot, "spot price was fetched").not.toBeNull();
-    const B = Math.round((spot as number) * NEAR_BARRIER.call);
 
     const ko = await runOne("knockout_call", B);
     const ki = await runOne("knockin_call", B);
