@@ -1,0 +1,278 @@
+[
+  {
+    "id": "spy-deal-2026-q1-ki-call-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Hedge fund $40M SPY 6M up-and-in call, K=ATM, B=110%, continuous monitoring, European exercise on hit. Net premium 60bps of spot vs 145bps for the vanilla 6M ATM call (~58% cheaper). Client motivation: pay only if a melt-up scenario triggers; otherwise lose the option. Hedged via SPY listed call calendar plus a small dynamic delta book."
+  },
+  {
+    "id": "spy-deal-2026-q1-asian-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Corporate treasury $75M SPY 12M Asian call, daily averaging over the final 60 trading days, K=ATM. Net premium 240bps vs 290bps for 12M ATM vanilla European call (~17% cheaper). Treasury used as overlay on a 12-month equity-linked compensation accrual; averaging dampens path-dependent payout risk vs vanilla."
+  },
+  {
+    "id": "spy-deal-2026-q1-lookback-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Family office $20M SPY 6M floating-strike lookback put, monitored daily. Net premium 295bps vs 105bps for 6M 95% European put. Premium reflects optionality on the running max. Hedged with a static 95-105% put spread plus daily rebalanced delta. Trade rationale: monetise volatility rather than direction."
+  },
+  {
+    "id": "qqq-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "QQQ",
+    "content": "QQQ market window assessment, Q1 2026. OPEN for vanilla and barrier structures. 1M ATM IV 18.0, 3M 19.5, 6M 20.7 — modest contango. Skew 25-delta risk reversal -4.5 vol points (puts richer). Listed liquidity strong within ±15% of spot, sized barriers (>$25M) require OTC. Investor flow tilts toward downside hedges given tech-heavy concentration; collar and put-spread RFQs running 2x normal pace."
+  },
+  {
+    "id": "qqq-deal-2026-q1-collar-1",
+    "doc_type": "deal",
+    "asset_class": "QQQ",
+    "content": "Comparable deal — Tech-focused hedge fund $80M QQQ zero-cost collar, 3M tenor. Long 95% put, short 110% call, both European. Indicative print at 0bps net (zero-cost). Vega slightly negative, theta negative on the put leg. Rationale: hedge concentrated tech exposure into Q1 earnings cycle."
+  },
+  {
+    "id": "qqq-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "QQQ",
+    "content": "Pricing benchmark — Q1 2026 QQQ reference levels. 3M ATM call 175bps of spot, 3M ATM put 165bps. 3M 95% put 110bps, 3M 90% put 75bps. 3M ko_put 80% barrier 102bps. 3M ki_call 110% barrier 65bps. 6M ATM straddle 380bps. Realized 30d vol 16.5%, 90d 17.8%; implied running 1.5-2.5 vol points rich vs realized."
+  },
+  {
+    "id": "iwm-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "IWM",
+    "content": "IWM (Russell 2000 ETF) market window, Q1 2026. CAUTIOUS for sizable barrier structures (>$25M) due to thinner listed liquidity vs SPY/QQQ. 3M ATM IV 22.0, skew steeper than large-caps (25Δ RR at -5.5 vol points). Vanilla and small barrier structures within ±10% of spot quote tight. KI call structures less standard — bid-ask widens to 3-4 vol points. Recommend tenor ≥3M to dampen monitoring slippage."
+  },
+  {
+    "id": "iwm-deal-2026-q1-putspread-1",
+    "doc_type": "deal",
+    "asset_class": "IWM",
+    "content": "Comparable deal — Asset manager $30M IWM 3M put spread (95%/85%), European exercise. Net debit 165bps. Hedged via listed market with no slippage. Client rationale: bounded small-cap downside hedge through year-end macro uncertainty, willing to forgo protection below 85% to halve premium vs outright 95% put."
+  },
+  {
+    "id": "iwm-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "IWM",
+    "content": "Pricing benchmark — Q1 2026 IWM levels. 3M ATM put 195bps, 3M ATM call 180bps. 3M 95% put 145bps, 3M 90% put 105bps. 3M ko_put 85% barrier 130bps. 6M ATM straddle 425bps. Realised 30d vol 19%, 90d 20.5% — implied 2-3 vol points rich. Hedging premium 10-20bps due to lower listed depth."
+  },
+  {
+    "id": "aapl-deal-2026-q1-koput-1",
+    "doc_type": "deal",
+    "asset_class": "AAPL",
+    "content": "Comparable deal — Family office $15M AAPL 6M down-and-out put, K=ATM, B=80%, continuous monitoring. Net premium 220bps vs 380bps vanilla 6M ATM put (~42% cheaper). Trade post-Q1 earnings, IV term-structure flattened from inversion. Hedged with vanilla 6M 80% put plus dynamic delta. Single-name pin-risk shift +30bps applied per desk practice."
+  },
+  {
+    "id": "aapl-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "AAPL",
+    "content": "Pricing benchmark — Q1 2026 AAPL post-earnings levels. 3M ATM call 320bps, 3M ATM put 350bps (skew). 6M ATM call 460bps, 6M ATM put 510bps. 3M ko_put 85% barrier 215bps, 6M ko_put 80% barrier 220bps. 1M ATM straddle 220bps (rich into earnings then crushed). Single-name skew steeper than index by 1.5-2 vol points on 25Δ wings."
+  },
+  {
+    "id": "nvda-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "NVDA",
+    "content": "NVDA market window, Q1 2026. CAUTIOUS for OTC structures larger than $30M notional given concentrated dealer inventory. 1M ATM IV 52, 3M 48, 6M 45 — backwardated reflecting near-term event clustering (CES, GTC, earnings). Skew exceptionally steep on put side (25Δ RR -8 vol points). Recommend post-earnings entry for non-event-driven structures; barrier structures within 10% of spot carry elevated gap-risk shift (+50bps)."
+  },
+  {
+    "id": "nvda-deal-2026-q1-vanilla-1",
+    "doc_type": "deal",
+    "asset_class": "NVDA",
+    "content": "Comparable deal — Hedge fund $25M NVDA 1M ATM straddle, European exercise. Net debit 720bps of spot — paying for terminal-vol exposure into AI capex print. Theta -25bps/day. Hedged via listed straddle plus dynamic delta. Post-earnings IV crush expectation: target unwind at 50% of premium decay assuming spot unchanged."
+  },
+  {
+    "id": "tsla-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "TSLA",
+    "content": "TSLA market window, Q1 2026. OPEN for retail-flow-driven structures, CAUTIOUS for institutional notional >$50M. Highest single-name vol in the corpus: 1M ATM IV 65, 3M 58. Skew bimodal — elevated put skew AND call skew (lottery flow). Listed liquidity exceptional but OTC pricing reflects retail dynamics. Barrier monitoring slippage shift +75bps for KO structures inside 15% of spot."
+  },
+  {
+    "id": "msft-deal-2026-q1-collar-1",
+    "doc_type": "deal",
+    "asset_class": "MSFT",
+    "content": "Comparable deal — Corporate insider $200M MSFT 12M zero-cost collar via 10b5-1, 90% put / 115% call, European, both legs equal vega. Indicative -3bps net (effectively zero-cost). Pre-cleared through legal as Rule 10b5-1 compliant. Long-tenor single-name collars cluster around 95%/110% post-2024 pickup in insider-collar usage."
+  },
+  {
+    "id": "msft-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "MSFT",
+    "content": "Pricing benchmark — Q1 2026 MSFT levels. 3M ATM call 240bps, 3M ATM put 255bps. 6M ATM call 330bps, 6M ATM put 350bps. 12M ATM call 480bps. 3M ko_put 85% barrier 175bps. Realized 30d vol 22%, 90d 23.5% — implied 1-1.5 vol points rich. Skew typical mega-cap (25Δ RR -3 vol points)."
+  },
+  {
+    "id": "general-rule-tenor-vs-monitoring",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner rule — Continuous-monitoring barriers price 5-15bps richer than discrete daily monitoring depending on barrier proximity. Standard convention: quote with continuous monitoring assumption and apply BGK shift = 0.5826 * sigma * sqrt(dt) * spot when client specifies daily discrete monitoring. Tighter (sub-daily) monitoring rare in equities; reserved for FX."
+  },
+  {
+    "id": "general-rule-short-tenor-greeks",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Vol regime guidance — Sub-1M vanilla options carry gamma/theta ratio that scales as 1/sqrt(T). Practical implication: 1W ATM straddles bleed roughly 3x the theta of 1M ATM equivalents on a daily basis but produce the same gamma exposure to a single-day move. Avoid for hedge accounting unless the underlying event is calendar-precise."
+  },
+  {
+    "id": "general-rule-knockin-payout-asymmetry",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — KI structures pay only if the barrier is hit during the monitoring window, then convert to a vanilla. Premium for KI is typically 30-70% of the equivalent vanilla, depending on barrier distance from spot. KI calls on indices price relatively higher than KI puts because positive drift makes upside barrier hits more likely than downside. Validator agents should flag KI structures with barriers more than 25% out-of-the-money as having near-zero hit probability — verify intent."
+  },
+  {
+    "id": "general-rule-asian-vol-haircut",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Asian options price at 60-80% of equivalent European on the same strike and tenor due to averaging volatility reduction. The averaging vol haircut depends on N (number of averaging dates) and averaging window length: arithmetic-average Asian over the final 30 days of a 6M tenor typically prices at ~75% of vanilla; averaging over the full tenor closer to 65%. Closed-form approximations (Turnbull-Wakeman, Levy) suffice for desk pricing; full Monte Carlo only required for path-dependent overlays."
+  },
+  {
+    "id": "general-rule-lookback-rich",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Floating-strike lookbacks are the richest standard exotic — typically 2-3x the premium of a vanilla European on the same tenor. They cap demand to clients explicitly buying optionality on the running max/min rather than terminal value. Hedging is via vanilla put-spread ladders plus dynamic delta. Avoid quoting lookbacks on illiquid single-names (<$5B ADV) without significant width."
+  },
+  {
+    "id": "general-rule-vol-of-vol-events",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Vol regime guidance — Vol-of-vol elevates around earnings, FOMC, and macro print clusters. 1W IV typically prints 30-50% above 1M IV in the 5 trading days before single-name earnings, then crushes 30-40% in the first hour post-print. Structurers should avoid quoting any structure that doesn't explicitly compensate for this — e.g. avoid short-vol structures crossing earnings unless premium is demonstrably wide vs historical IV crush."
+  },
+  {
+    "id": "spy-mw-2025-q4-fomc",
+    "doc_type": "market_window",
+    "asset_class": "SPY",
+    "content": "SPY market window, Q4 2025 — pre-December FOMC. CAUTIOUS for tenors crossing the 17-Dec FOMC date. 1M ATM IV elevated to 17.5 from baseline 14, 3M IV stable at 16.5 implying steep front-month event premium. Recommended structuring posture: sell the front month, buy the back month (calendar) for vega-positive plays; avoid uncovered short-gamma structures bracketing the FOMC date."
+  },
+  {
+    "id": "spy-deal-2025-q4-calendar-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Vol-relative-value fund $30M SPY ATM call calendar, long 3M / short 1M, both K=ATM, European exercise. Net debit 95bps. Trade thesis: monetise FOMC-event front-month premium decay. Theta positive on the front leg, gamma neutral on inception, vega-positive ~+200 vega-bps."
+  },
+  {
+    "id": "spy-deal-2025-q4-iron-condor-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Volatility-arb fund $50M SPY 1M iron condor, sell 95%/105% strangle, buy 90%/110% wings. Net credit 35bps. Max risk 5% spot move beyond outer strikes. Hedged via listed market. Rationale: monetise short-gamma in compressed-vol regime; max profit if SPY pinned within ±5% over the 1M tenor."
+  },
+  {
+    "id": "rty-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "RUT",
+    "content": "RUT (Russell 2000 cash index) market window, Q1 2026. CAUTIOUS for OTC barrier structures due to lack of single-stock hedge depth. 3M ATM IV 23, slope steepens to 25 at 6M. Use IWM ETF for retail-driven listed flow; institutional OTC flows typically negotiated 3-4 vol points wide of listed mid. Skew steeper than SPX (25Δ RR -6 vol points)."
+  },
+  {
+    "id": "vix-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "VIX",
+    "content": "VIX commentary, Q1 2026. VIX cash index 13.5, VIX futures contango (M1 14.0, M2 15.5, M3 16.8). VIX call upside premium elevated post-2024 crash episodes — 1M VIX 25-strike call printing at 22% IV (rich vs cash IV). VIX-linked structures most useful as tail-hedge overlays; not appropriate for delta-one or income strategies. Coordinate with vol surface and SPX skew when pricing structures referencing VIX."
+  },
+  {
+    "id": "general-rule-correlation-worst-of",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Worst-of (multi-asset) structures price as min(S1,S2,...) at expiry; their value falls with realised correlation between underlyings. Standard 2-name worst-of basket on S&P large-caps prices at 70-85% of single-name vanilla (lower correlation = cheaper worst-of). Validator should flag worst-of structures with implied basket correlation outside 0.4-0.85 range as outliers — most desk paper trades within this band."
+  },
+  {
+    "id": "general-rule-dispersion-trade",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Dispersion trades are short index variance / long single-name variance. Profitable when realised correlation drops below the implied correlation premium baked into index variance. Index variance swap typically prices at 1-3 vol points above the correlation-weighted basket of single-name variance swaps. Trade is vega-neutral on inception but gamma-sensitive to basket dispersion realisations."
+  },
+  {
+    "id": "general-rule-divs-on-puts",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Discrete dividends on single-name options are handled via PV-of-dividends adjustment to the spot for European options (Black-Scholes with q=0 plus PV(div) subtracted), and via discrete-dividend tree / FDM for American options. For options crossing 2+ ex-div dates, the early-exercise premium on American puts widens materially — typical American/European put differential 5-15bps for 6M tenor across 2 ex-div dates."
+  },
+  {
+    "id": "general-rule-spread-hedge",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Bid-ask on listed SPY/QQQ vanilla options inside 0-3M tenor and within ±5% of spot is typically 1-3 cents wide on the front month, widening to 5-15 cents at 6M. OTC structures add hedging-cost premium of 5-15bps for sub-$50M tickets, 15-30bps for >$50M depending on barrier proximity, monitoring frequency, and dealer inventory. Flag any structure quoting tighter than 5bps wide as suspect."
+  },
+  {
+    "id": "general-rule-wall-effect",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Major option strikes with high open interest create gamma-pinning behaviour into expiry, especially for SPY / SPX. Flag risk: client's KO/KI structure with barrier within 1% of a major listed strike should be quoted with widened pin-risk premium (+25-50bps) and senior review. Pin-risk peaks in the final 3 trading days before quarterly expiry."
+  },
+  {
+    "id": "general-rule-vega-roll",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Long-tenor vega exposure (>6M) is increasingly hard to hedge with listed vanillas as listed depth thins beyond 9M. Standard practice: build a vega ladder with 3M, 6M, 9M, 12M tenor blocks; rebalance monthly. For client-driven 12M+ structures, expect to retain 30-50% residual vega exposure that cannot be fully neutralised at inception."
+  },
+  {
+    "id": "general-rule-quanto-fx",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Quanto options on US equities sold to non-USD clients (EUR/JPY/GBP) carry an FX-correlation premium of 1-3 vol points depending on tenor and FX vol. Standard pricing convention: adjust the drift in the foreign-measure SDE by -rho*sigma_S*sigma_FX. Worth flagging at intake whenever client base currency differs from underlying listing currency."
+  },
+  {
+    "id": "spy-deal-2026-q1-autocall-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Private bank distributor 6M SPY autocallable, $100M tranche, 95% downside barrier (European), quarterly autocall observation at 100% of initial spot, coupon 9.5% p.a. Indicative reoffer 100.0, dealer model price 99.45, distribution margin 55bps. Rationale: yield-enhancement product for retail client base, sized to fully hedge via listed SPY market plus minimal vega residual."
+  },
+  {
+    "id": "qqq-deal-2026-q1-koput-1",
+    "doc_type": "deal",
+    "asset_class": "QQQ",
+    "content": "Comparable deal — Pension overlay $60M QQQ 6M down-and-out put, K=ATM, B=85%, continuous monitoring. Net premium 105bps vs 195bps vanilla 6M ATM put (~46% cheaper). Trade rationale: cheap tail-hedge that disappears in benign markets. Hedged with vanilla 6M 85% put plus dynamic delta book; pin-risk shift +25bps applied at quote."
+  },
+  {
+    "id": "spy-deal-2026-q2-asian-1",
+    "doc_type": "deal",
+    "asset_class": "SPY",
+    "content": "Comparable deal — Endowment $40M SPY 9M Asian put, daily averaging full tenor, K=95%. Net premium 145bps vs 220bps for 9M 95% European put (~34% cheaper from averaging vol haircut). Endowment used to hedge mark-to-market on a 9M private fund commitment with month-end NAV references."
+  },
+  {
+    "id": "general-rule-vega-of-vega",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Volga (vega-of-vega) is highest near at-the-money and decays to zero at deep OTM/ITM. Practical implication: quoting wide ATM straddles on volatile underlyings exposes the desk to second-order vol risk that is difficult to hedge with vanilla options alone. Reserve volga exposure budget; avoid concentrating volga in a single underlying without explicit risk-committee sign-off above $20M notional."
+  },
+  {
+    "id": "general-rule-monitoring-shift",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Discrete-monitoring shift for barrier options follows BGK formula: B_continuous = B_discrete * exp(-0.5826 * sigma * sqrt(dt)) for downside barriers (and reversed sign for upside). At sigma=20%, daily monitoring (dt=1/252), this is roughly 0.7% shift of the barrier. For continuously monitored equity barriers, no shift required. Asian and lookback structures use their own averaging-frequency conventions, not BGK."
+  },
+  {
+    "id": "spy-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "SPY",
+    "content": "SPY market window, Q2 2026. OPEN for vanilla and barrier structures across all standard tenors. 1M ATM IV 13.0, 3M 14.5, 6M 16.0 — orderly contango, no event distortions. Skew 25-delta RR -3.0 vol points (broadly normal). Listed liquidity excellent within ±15% of spot. Demand tilts toward income / yield-enhancement (covered calls, ratio spreads) given low-vol regime; barrier put structures less active than Q1."
+  },
+  {
+    "id": "general-rule-hedge-cost-vs-size",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Hedging-cost premium for OTC option structures scales sub-linearly with notional. Empirically: $10M ticket adds 5-8bps; $50M adds 12-18bps; $100M adds 18-25bps; $250M+ adds 30-50bps and may require pre-trade dealer survey. Driver is dealer inventory capacity and the listed-vs-OTC delta gap. Validator should flag any quote where hedging premium is not explicitly disclosed for tickets >$25M."
+  },
+  {
+    "id": "general-rule-fair-value-band",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Validator guidance — Acceptable model-vs-comparable spread for vanilla index options is ±10bps of spot. Beyond that, escalate to senior review or re-check vol surface inputs. For barrier and exotic structures, band widens to ±25bps of spot. For multi-asset (worst-of, dispersion) the band is structure-specific; defer to risk committee. The corpus is the source of truth for 'comparable' — prefer multiple corpus prints over a single dealer indication."
+  },
+  {
+    "id": "general-rule-fed-meeting-calendar",
+    "doc_type": "general",
+    "asset_class": "MACRO",
+    "content": "Macro calendar — FOMC meets eight times per year on Tuesday-Wednesday cycle. Front-month vol typically inflates 1-3 vol points in the 5 trading days before the meeting. Press conference (Wednesday 2:30pm ET) is the highest single-event vol moment in the calendar outside payrolls and CPI. Avoid pricing income structures whose maturity sits within 7 calendar days of an FOMC date without explicit event-vol adjustment."
+  },
+  {
+    "id": "general-rule-earnings-calendar",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Practitioner note — Single-name earnings dates inflate front-month IV by 30-60% above baseline; the inflation begins ~10 trading days pre-print and crushes 30-50% of premium in the first hour post-print. Structures crossing earnings should explicitly price the earnings-vol component. Standard practice: quote two prices — pre-event and post-event — and let client choose entry timing. For barrier structures crossing earnings, increase gap-risk shift by 50-100bps depending on historical post-earnings move distribution."
+  },
+  {
+    "id": "spy-pb-2025-q4",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "SPY",
+    "content": "Pricing benchmark — Q4 2025 SPY reference levels, post-FOMC. 3M ATM call 152bps of spot, 3M ATM put 145bps. 3M 95% put 110bps, 3M 90% put 78bps. 3M ko_put 80% barrier 100bps. 3M ki_call 110% barrier 55bps. 6M ATM straddle 305bps. Realized 30d vol 14%, 90d 13.5%; implied running 1.5-2 vol points rich vs realised."
+  },
+  {
+    "id": "general-rule-quote-confidence",
+    "doc_type": "general",
+    "asset_class": "EQUITY",
+    "content": "Validator guidance — Quote confidence should be 'high' only when the corpus contains 3+ comparable trades within ±15% of structure parameters AND all are dated within the prior 90 days. 'medium' if 1-2 comparables OR comparables are 90-180 days old. 'low' for everything else, with an explicit recommendation to seek a dealer-survey indication. The Narrator should reproduce confidence in the memo verbatim."
+  }
+]

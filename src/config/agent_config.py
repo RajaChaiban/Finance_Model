@@ -68,6 +68,7 @@ class AgentConfig:
     gemini_api_key: str = ""
     fred_api_key: str = ""
     polygon_api_key: str = ""
+    openrouter_api_key: str = ""
 
     # Demo / safety knobs.
     demo_replay: bool = False
@@ -95,19 +96,40 @@ class AgentConfig:
     market_intel_enabled: bool = True
     market_intel_persist_dir: str = "./data/market_intel"
     market_intel_collection: str = "market-intelligence"
-    market_intel_embeddings_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    market_intel_embeddings_model: str = "BAAI/bge-base-en-v1.5"
     # Which Gemini tier the MI prompts call. Free-form Q&A is short-context
     # and structured — fast tier is the right default.
     market_intel_model: str = DEFAULT_MODEL_FAST
+
+    # MI synthesis-LLM provider. "gemini" (default) routes through the same
+    # LLMClient the agents use (cost-tracking, retries, DEMO_REPLAY).
+    # "openrouter" routes via openrouter_adapter — useful when Gemini is
+    # quota-blocked or you want to swap models per session.
+    market_intel_llm_provider: str = "gemini"
+    # OpenRouter model id when provider="openrouter". Provider/model form.
+    market_intel_openrouter_model: str = "anthropic/claude-haiku-4-5"
+    # Optional headers OpenRouter uses for rankings/leaderboard attribution.
+    market_intel_openrouter_referer: str = ""
+    market_intel_openrouter_title: str = ""
 
     @property
     def has_gemini(self) -> bool:
         return bool(self.gemini_api_key) and not self.demo_replay
 
     @property
+    def has_openrouter(self) -> bool:
+        return bool(self.openrouter_api_key) and not self.demo_replay
+
+    @property
     def market_intel_active(self) -> bool:
         """MI runs when the flag is on AND we have a usable LLM (live or replay)."""
-        return self.market_intel_enabled and (self.has_gemini or self.demo_replay)
+        if not self.market_intel_enabled:
+            return False
+        if self.demo_replay:
+            return True
+        if self.market_intel_llm_provider == "openrouter":
+            return self.has_openrouter
+        return self.has_gemini
 
 
 def _from_env() -> AgentConfig:
@@ -130,6 +152,7 @@ def _from_env() -> AgentConfig:
         gemini_api_key=gemini_key,
         fred_api_key=os.getenv("FRED_API_KEY", "").strip(),
         polygon_api_key=os.getenv("POLYGON_API_KEY", "").strip(),
+        openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
         demo_replay=os.getenv("DEMO_REPLAY", "0").strip() in {"1", "true", "True"},
         cost_ceiling_usd=float(os.getenv("AGENT_COST_CEILING_USD", "0.50")),
         model_smart=smart,
@@ -149,9 +172,21 @@ def _from_env() -> AgentConfig:
         ).strip() or "market-intelligence",
         market_intel_embeddings_model=os.getenv(
             "MARKET_INTEL_EMBEDDINGS_MODEL",
-            "sentence-transformers/all-MiniLM-L6-v2",
-        ).strip() or "sentence-transformers/all-MiniLM-L6-v2",
+            "BAAI/bge-base-en-v1.5",
+        ).strip() or "BAAI/bge-base-en-v1.5",
         market_intel_model=_per_agent("AGENT_MODEL_MARKET_INTEL", fast),
+        market_intel_llm_provider=os.getenv(
+            "MARKET_INTEL_LLM_PROVIDER", "gemini"
+        ).strip().lower() or "gemini",
+        market_intel_openrouter_model=os.getenv(
+            "MARKET_INTEL_OPENROUTER_MODEL", "anthropic/claude-haiku-4-5"
+        ).strip() or "anthropic/claude-haiku-4-5",
+        market_intel_openrouter_referer=os.getenv(
+            "MARKET_INTEL_OPENROUTER_REFERER", ""
+        ).strip(),
+        market_intel_openrouter_title=os.getenv(
+            "MARKET_INTEL_OPENROUTER_TITLE", ""
+        ).strip(),
     )
 
 

@@ -577,6 +577,123 @@ def test_existing_llm_adapter_wraps_llm_client():
     assert fc.calls[0]["messages"] == [{"role": "user", "content": "hello"}]
 
 
+def test_openrouter_adapter_posts_chat_completions(monkeypatch):
+    """openrouter_adapter must hit the chat-completions endpoint with the
+    correct auth header, model, and OpenAI-compatible message shape, and
+    must extract the assistant text from choices[0].message.content."""
+    from src.agents.market_intelligence import openrouter_adapter
+
+    class _FakeResp:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "id": "gen-test",
+                "choices": [
+                    {"message": {"role": "assistant", "content": "hello back"}}
+                ],
+            }
+
+    class _FakeClient:
+        def __init__(self):
+            self.calls = []
+            self.closed = False
+
+        def post(self, url, headers=None, json=None):
+            self.calls.append({"url": url, "headers": headers, "body": json})
+            return _FakeResp()
+
+        def close(self):
+            self.closed = True
+
+    fc = _FakeClient()
+    call = openrouter_adapter(
+        api_key="sk-test",
+        model="anthropic/claude-haiku-4-5",
+        max_tokens=512,
+        temperature=0.3,
+        referer="https://test.local",
+        title="VolDeskTest",
+        http_client=fc,
+    )
+    out = call("hello", "you are helpful")
+
+    assert out == "hello back"
+    assert len(fc.calls) == 1
+    assert fc.calls[0]["url"] == "https://openrouter.ai/api/v1/chat/completions"
+    assert fc.calls[0]["headers"]["Authorization"] == "Bearer sk-test"
+    assert fc.calls[0]["headers"]["HTTP-Referer"] == "https://test.local"
+    assert fc.calls[0]["headers"]["X-Title"] == "VolDeskTest"
+    body = fc.calls[0]["body"]
+    assert body["model"] == "anthropic/claude-haiku-4-5"
+    assert body["max_tokens"] == 512
+    assert body["temperature"] == 0.3
+    assert body["messages"] == [
+        {"role": "system", "content": "you are helpful"},
+        {"role": "user", "content": "hello"},
+    ]
+    # We injected http_client, so the adapter must NOT close it for us.
+    assert fc.closed is False
+
+
+def test_openrouter_adapter_requires_api_key(monkeypatch):
+    """No api_key arg AND no OPENROUTER_API_KEY env var must raise."""
+    from src.agents.market_intelligence import openrouter_adapter
+
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        openrouter_adapter()
+
+
+def test_openrouter_adapter_returns_empty_on_http_error():
+    """Network / HTTP errors should be logged and return "" so the pipeline
+    degrades like a Gemini failure (no citations) rather than crashing."""
+    import httpx
+
+    from src.agents.market_intelligence import openrouter_adapter
+
+    class _FailingClient:
+        def post(self, *_args, **_kwargs):
+            raise httpx.ConnectError("connection refused")
+
+        def close(self):
+            pass
+
+    call = openrouter_adapter(api_key="sk-test", http_client=_FailingClient())
+    assert call("hello") == ""
+
+
+def test_openrouter_adapter_omits_system_when_none():
+    """When system is None, only the user message should be sent."""
+    from src.agents.market_intelligence import openrouter_adapter
+
+    class _FakeResp:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+    class _FakeClient:
+        def __init__(self):
+            self.body = None
+
+        def post(self, url, headers=None, json=None):
+            self.body = json
+            return _FakeResp()
+
+        def close(self):
+            pass
+
+    fc = _FakeClient()
+    call = openrouter_adapter(api_key="sk-test", http_client=fc)
+    call("hello")
+    assert fc.body["messages"] == [{"role": "user", "content": "hello"}]
+
+
 def test_market_context_low_confidence_no_results_skipped(fake_mi):
     """If general_query reports `confidence='low'` AND no sources AND its
     answer is the 'no relevant documents' boilerplate, that entry should NOT

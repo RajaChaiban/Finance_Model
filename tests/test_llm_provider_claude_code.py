@@ -9,6 +9,19 @@ import pytest
 from src.agents.llm_provider import ClaudeCodeProvider, get_provider
 
 
+@pytest.fixture(autouse=True)
+def _clean_provider_env(monkeypatch):
+    """Other test modules (e.g. market_intelligence integration) set
+    DEMO_REPLAY=1 at module-import time via os.environ.setdefault, which
+    leaks across the pytest session and causes get_provider() to return a
+    MockProvider here. Clear those vars per-test; monkeypatch auto-cleans.
+    """
+    monkeypatch.delenv("DEMO_REPLAY", raising=False)
+    # API keys aren't read by the claude_code branch, but tests that hit
+    # the gemini/anthropic branches need them absent unless the test sets them.
+    yield
+
+
 def _fake_proc(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
     p = MagicMock()
     p.stdout = stdout

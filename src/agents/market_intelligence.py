@@ -228,10 +228,15 @@ class ChromaVectorStore(VectorStore):
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         query_embedding = self.embeddings.embed_text(query)
+        # Chroma >= 0.5 requires $and for multi-key where clauses; single-key
+        # dicts pass through unchanged.
+        where_clause: Optional[Dict[str, Any]] = filters or None
+        if where_clause and len(where_clause) > 1:
+            where_clause = {"$and": [{k: v} for k, v in where_clause.items()]}
         results = self.collection.query(
             query_embeddings=[query_embedding],
             n_results=k,
-            where=filters or None,
+            where=where_clause,
         )
         out: List[SearchResult] = []
         if results.get("ids") and results["ids"][0]:
@@ -267,7 +272,7 @@ class RetrievalEngine:
         k: int = 5,
         asset_class: Optional[str] = None,
         doc_type: Optional[str] = None,
-        min_score: float = 0.3,
+        min_score: float = 0.45,
     ) -> List[SearchResult]:
         filters: Dict[str, Any] = {}
         if asset_class:
@@ -321,78 +326,89 @@ class RetrievalEngine:
 
 class PromptManager:
     SYSTEM_MARKET_INTELLIGENCE = (
-        "You are an expert structured finance analyst with 15+ years of "
-        "experience across CLOs, ABS, CMBS, and structured credit markets. "
-        "You provide accurate, data-driven insights about market conditions, "
-        "pricing levels, and issuance windows.\n\n"
-        "You have access to recent market data, comparable deals, and "
-        "historical precedents. Your responses should:\n"
-        "1. Be specific and evidence-based\n"
-        "2. Include relevant comparable deals or data points\n"
-        "3. Explain the reasoning behind your assessment\n"
-        "4. Flag uncertainties or limitations\n"
-        "5. Provide actionable recommendations"
+        "You are a senior equity-derivatives strategist on a vol desk with "
+        "15+ years across single-stock options, index vol, and listed/OTC "
+        "exotics (vanilla, knock-out/knock-in barriers, Asian, lookback). "
+        "You synthesise dealer commentary, listed quotes, and comparable "
+        "OTC trades into actionable market context for structurers.\n\n"
+        "Your responses should:\n"
+        "1. Be specific and evidence-based — cite vol points, bps of spot, "
+        "or skew levels rather than generic adjectives\n"
+        "2. Reference comparable trades or recent prints when available\n"
+        "3. Frame in terms of skew, term structure, realised-vs-implied, "
+        "and barrier proximity where relevant\n"
+        "4. Flag uncertainties and regime caveats\n"
+        "5. Stay under 8 sentences"
     )
 
     SYSTEM_PRICING = (
-        "You are a structured finance pricing expert. You analyze "
-        "comparable deals, market conditions, and investor demand to "
-        "provide accurate pricing recommendations.\n\n"
-        "When analyzing pricing:\n"
-        "1. Reference specific comparable deals with dates and pricing\n"
-        "2. Explain spread movements and their drivers\n"
-        "3. Consider market conditions and investor appetite\n"
-        "4. Provide ranges rather than point estimates when appropriate\n"
-        "5. Note assumptions and risks"
+        "You are an equity-derivatives pricing expert. You compare a model "
+        "price (QuantLib) against recent comparable trades and listed "
+        "reference levels to flag whether the quote is rich, cheap, or "
+        "in line with market.\n\n"
+        "When analysing pricing:\n"
+        "1. Quote in bps of spot or premium-of-notional, not abstract spread\n"
+        "2. Reference dated comparable trades when present in the corpus\n"
+        "3. Explain drivers — skew, term-structure slope, barrier proximity, "
+        "discrete-monitoring shift, hedging-cost premium\n"
+        "4. Provide a range, not a point estimate\n"
+        "5. Note assumptions (vol surface, monitoring frequency, dividends)"
     )
 
     SYSTEM_DEAL_ANALYSIS = (
-        "You are an expert in structured finance deal analysis and "
-        "documentation. You understand complex deal structures, legal "
-        "covenants, and transaction mechanics.\n\n"
-        "When analyzing deals:\n"
-        "1. Extract key terms and structure\n"
-        "2. Identify risks and mitigants\n"
-        "3. Highlight unusual or notable provisions\n"
-        "4. Compare to market precedent\n"
-        "5. Summarize in clear, concise language"
+        "You are an expert in equity-derivatives structuring. You position a "
+        "candidate trade against the corpus of recent prints and dealer "
+        "commentary to surface precedent, outliers, and execution risks.\n\n"
+        "When analysing a structure:\n"
+        "1. Extract the payoff shape, tenor, strikes, barriers, monitoring\n"
+        "2. Identify hedging risks (pin, gap, vega-of-vega, correlation)\n"
+        "3. Highlight unusual barrier placement, tenor, or notional vs. corpus\n"
+        "4. Compare explicitly to the closest precedent — call out if there "
+        "is no precedent or no comparable trade in the corpus\n"
+        "5. Summarise in 5-7 sentences"
     )
 
     TEMPLATE_MARKET_WINDOW = (
-        "Based on the following recent market data and comparable deals, "
-        "assess the current market window for {asset_class} issuance:\n\n"
-        "Recent Deals:\n{recent_deals}\n\n"
-        "Market Data:\n{market_data}\n\n"
-        "Provide assessment of:\n"
-        "1. Whether market is OPEN / CAUTIOUS / CLOSED\n"
-        "2. Investor appetite by tranche type\n"
-        "3. Key barriers or tailwinds\n"
-        "4. Timeline and conditions for improvement/deterioration"
+        "Based on the following recent prints and listed reference data, "
+        "assess the current market window for {asset_class} option-issuance "
+        "and structuring activity:\n\n"
+        "Recent Trades / Prints:\n{recent_deals}\n\n"
+        "Market Data (vol surface, skew, term structure):\n{market_data}\n\n"
+        "Provide:\n"
+        "1. Whether the market window is OPEN / CAUTIOUS / CLOSED for "
+        "vanilla and barrier structures\n"
+        "2. Liquidity and bid-ask by structure type (vanilla, KO/KI, Asian, "
+        "lookback)\n"
+        "3. Key tailwinds or headwinds (earnings, macro, skew regime)\n"
+        "4. Conditions that would shift the window"
     )
 
     TEMPLATE_PRICING_BENCHMARK = (
-        "Based on recent comparable deals and market data, provide pricing "
-        "benchmarks for a {tranche_type} tranche in {asset_class}:\n\n"
-        "Comparable Deals:\n{comparable_deals}\n\n"
+        "Based on recent comparable prints and listed reference levels, "
+        "provide pricing benchmarks for a {tranche_type} structure on "
+        "{asset_class}:\n\n"
+        "Comparable Trades:\n{comparable_deals}\n\n"
         "Current Market Conditions:\n{market_conditions}\n\n"
         "Provide:\n"
-        "1. Current pricing range (spread or OAS)\n"
-        "2. Historical context (5yr, 1yr, 3m averages)\n"
-        "3. Key pricing drivers\n"
-        "4. Range of possible outcomes\n"
-        "5. Confidence level"
+        "1. Current pricing range in bps of spot (or premium-of-notional)\n"
+        "2. Historical context where the corpus supports it\n"
+        "3. Key pricing drivers — skew, term structure, barrier proximity, "
+        "hedging-cost premium\n"
+        "4. Range of plausible outcomes\n"
+        "5. Confidence level (high/medium/low) and what would tighten it"
     )
 
     TEMPLATE_DEAL_INTELLIGENCE = (
-        "Analyze the following {asset_class} deal structure and provide "
-        "market intelligence:\n\n"
-        "Deal Summary:\n{deal_summary}\n\n"
-        "Market Comparables:\n{comparables}\n\n"
+        "Analyse the following {asset_class} option structure and provide "
+        "market-context intelligence:\n\n"
+        "Deal / Structure Summary:\n{deal_summary}\n\n"
+        "Corpus Comparables:\n{comparables}\n\n"
         "Provide:\n"
-        "1. Deal positioning in market\n"
-        "2. Structure analysis vs. market precedent\n"
-        "3. Potential investor concerns\n"
-        "4. Anticipated demand by investor type\n"
+        "1. Where this structure sits in the corpus — is it typical, an "
+        "outlier, or with no comparable / no precedent?\n"
+        "2. Hedging and execution risks (pin, gap, vega, correlation)\n"
+        "3. Likely investor / counterparty type\n"
+        "4. Pricing posture vs. comparables\n"
         "5. Key risks and mitigants"
     )
 
@@ -448,6 +464,101 @@ def anthropic_adapter(
             messages=[{"role": "user", "content": prompt}],
         )
         return resp.content[0].text
+    return _call
+
+
+def openrouter_adapter(
+    api_key: Optional[str] = None,
+    model: str = "anthropic/claude-haiku-4-5",
+    max_tokens: int = 2000,
+    temperature: float = 0.7,
+    timeout_s: float = 60.0,
+    referer: Optional[str] = None,
+    title: Optional[str] = None,
+    http_client: Optional[Any] = None,
+) -> LLMCall:
+    """Wrap OpenRouter's chat-completions endpoint into the LLMCall contract.
+
+    OpenRouter aggregates 100+ models (Anthropic, OpenAI, Google, Meta,
+    Mistral, ...) behind one OpenAI-compatible API. Pass any provider/model
+    id and OpenRouter routes it. Sign up at https://openrouter.ai —
+    pay-as-you-go, no minimum.
+
+    Args:
+        api_key: OpenRouter API key. Falls back to OPENROUTER_API_KEY env var.
+        model: OpenRouter model id (provider/model). Examples:
+            'anthropic/claude-opus-4-7', 'anthropic/claude-haiku-4-5',
+            'openai/gpt-5', 'google/gemini-3-pro-preview',
+            'meta-llama/llama-3.3-70b-instruct'.
+        max_tokens: cap on response tokens.
+        temperature: sampling temperature.
+        timeout_s: per-call timeout (httpx).
+        referer: optional HTTP-Referer header (improves OpenRouter rankings).
+        title: optional X-Title header (improves OpenRouter rankings).
+        http_client: optional httpx.Client (for testing or pooling). When
+            None, a one-shot client is created and closed per call.
+
+    Failure mode:
+        Network / HTTP errors are logged and return "" so the structuring
+        pipeline degrades the same way it does on Gemini failures (no
+        citations rather than crashing the agent).
+    """
+    import httpx
+
+    key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+    if not key:
+        raise ValueError(
+            "openrouter_adapter requires an api_key argument or "
+            "OPENROUTER_API_KEY env var."
+        )
+
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+    if referer:
+        headers["HTTP-Referer"] = referer
+    if title:
+        headers["X-Title"] = title
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    def _call(prompt: str, system: Optional[str] = None) -> str:
+        messages: List[Dict[str, str]] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        body: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        client = http_client or httpx.Client(timeout=timeout_s)
+        try:
+            resp = client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.HTTPError as exc:
+            logger.warning(f"OpenRouter call failed: {exc}")
+            return ""
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"OpenRouter call returned unparseable body: {exc}")
+            return ""
+        finally:
+            if http_client is None:
+                try:
+                    client.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+        choices = data.get("choices") or []
+        if not choices:
+            logger.warning(f"OpenRouter returned no choices: {data}")
+            return ""
+        msg = choices[0].get("message") or {}
+        return msg.get("content") or ""
+
     return _call
 
 
@@ -790,13 +901,35 @@ def get_market_intelligence() -> Optional["MarketIntelligence"]:
         return None
 
     try:
-        client = get_llm_client()
-        llm_call = existing_llm_adapter(
-            client,
-            model=cfg.market_intel_model,
-            agent_name="MarketIntelligence",
-            replay_key="MarketIntelligence:default",
-        )
+        # Pick the synthesis-LLM adapter. DEMO_REPLAY always routes through
+        # the existing LLMClient so canned responses are returned. Otherwise
+        # branch on the configured provider.
+        if cfg.demo_replay or cfg.market_intel_llm_provider == "gemini":
+            client = get_llm_client()
+            llm_call = existing_llm_adapter(
+                client,
+                model=cfg.market_intel_model,
+                agent_name="MarketIntelligence",
+                replay_key="MarketIntelligence:default",
+            )
+        elif cfg.market_intel_llm_provider == "openrouter":
+            llm_call = openrouter_adapter(
+                api_key=cfg.openrouter_api_key,
+                model=cfg.market_intel_openrouter_model,
+                referer=cfg.market_intel_openrouter_referer or None,
+                title=cfg.market_intel_openrouter_title or None,
+            )
+            logger.info(
+                f"MarketIntelligence: using OpenRouter "
+                f"({cfg.market_intel_openrouter_model})"
+            )
+        else:
+            logger.warning(
+                f"Unknown MARKET_INTEL_LLM_PROVIDER={cfg.market_intel_llm_provider!r}; "
+                "disabling MI."
+            )
+            return None
+
         _GLOBAL_MI = MarketIntelligence(
             llm_call=llm_call,
             persist_dir=cfg.market_intel_persist_dir,
@@ -850,6 +983,7 @@ __all__ = [
     "LLMCall",
     "gemini_adapter",
     "anthropic_adapter",
+    "openrouter_adapter",
     "existing_llm_adapter",
     "get_market_intelligence",
     "reset_market_intelligence",

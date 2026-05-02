@@ -10,7 +10,7 @@ A **FastAPI + React derivatives pricing platform** ("Vol Desk") with three layer
 2. **Vol Desk market intelligence** — live indices, top movers, click-to-prefill
 3. **Structuring Co-pilot** — 7-agent (Gemini-driven) workflow with HITL gates
 
-Backend port **8002**, frontend port **5173**. **1202 backend tests.**
+Backend port **8002**, frontend port **5173**. **1286 backend tests.**
 
 ## Where to look first
 
@@ -74,7 +74,7 @@ Finance_Model/
 │   ├── package.json           recharts 3, react 19, vite 8, playwright
 │   └── playwright.config.ts
 │
-├── tests/                     pytest backend tests (~1202)
+├── tests/                     pytest backend tests (~1286)
 │   └── fixtures/demo_replay.json   Canned LLM responses for agent tests
 │
 ├── configs/                   YAML configs for batch CLI runs
@@ -119,10 +119,78 @@ python -m pytest tests/test_asian.py -v
 # Frontend e2e
 cd frontend && npx playwright test
 
+# Frontend type-check + bundle (use this as the "did I break the frontend?" gate)
+cd frontend && npm run build
+
 # CLI batch pricing
 python main.py --config configs/american_put_spy.yaml --fetch-market-data
 python main.py --config configs/knockout_call_spy.yaml --use-vol-surface
 ```
+
+## Test-fix-proceed loop (REQUIRED for every non-trivial change)
+
+**This is a standing instruction.** After any code change that is more than a
+typo or a one-line doc fix, run the loop below until it terminates green
+before declaring the work done. Do NOT report success on a change that has
+not been verified through this loop.
+
+```
+                ┌──────────────────────┐
+                │  Make a change       │
+                └──────────┬───────────┘
+                           ▼
+                ┌──────────────────────┐
+                │  Run the gates       │
+                │  (see Gates below)   │
+                └──────────┬───────────┘
+                           ▼
+                  ┌────────────────┐
+                  │  All green?    │
+                  └─┬────────────┬─┘
+                yes │            │ no
+                    ▼            ▼
+              ┌─────────┐  ┌────────────────────┐
+              │ Proceed │  │ Diagnose root cause│
+              │ (move on│  │ — DO NOT silence   │
+              │  / next │  │ the failure or     │
+              │  task / │  │ delete the test.   │
+              │  PR)    │  └─────────┬──────────┘
+              └─────────┘            ▼
+                           ┌──────────────────────┐
+                           │ Apply minimal fix    │
+                           └──────────┬───────────┘
+                                      └─► back to "Run the gates"
+```
+
+### Gates (run all that apply to the surface you touched)
+
+| Surface touched | Required gate | Command |
+|---|---|---|
+| Any Python in `src/` | Full backend tests | `python -m pytest tests/ --ignore=tests/test_gs_quant_engine.py` |
+| Pricing engine / router | Backend tests **and** a sample `POST /api/price` against a running uvicorn | see "How to run things" |
+| Agent / orchestrator | Backend tests **and** a sample `POST /api/agent/sessions` round-trip | — |
+| RAG / `market_intelligence.py` | `pytest tests/test_market_intelligence_integration.py tests/test_fred_ingester.py` **and** a live retrieval probe via `get_market_intelligence()` | — |
+| Frontend | `cd frontend && npm run build` (catches type errors + bundle errors) | — |
+| Anything that changes API request/response shape | Backend tests **and** frontend build (frontend types live in `frontend/src/types.ts`) | — |
+| Test infrastructure / fixtures | Run the **whole** suite at least twice in different orders to catch isolation leaks (see `tests/test_llm_provider_claude_code.py` for prior example) | — |
+
+### Loop rules — do not skip
+
+- **Pre-existing failures are not "free passes."** If the suite was red before
+  your change, capture the baseline first (`git stash && pytest …`) and prove
+  your change didn't add new failures. Don't assume; verify.
+- **Test isolation matters.** Failures that only appear when the full suite
+  runs together are real bugs (usually env-var / singleton leaks). Diagnose
+  by bisecting test order, not by re-running until lucky.
+- **Don't delete or `xfail` failing tests to make the loop terminate.**
+  That's not "green," it's "hidden red." Fix the root cause.
+- **Don't claim work is done until the loop has actually terminated green.**
+  "I think it should work" is not a gate.
+- **The loop applies recursively.** If a fix introduces a new failure, the
+  loop restarts from that failure — don't carry forward.
+
+When the loop terminates green, only THEN write the end-of-turn summary,
+commit, or open a PR.
 
 ## Default search policy for AI agents
 

@@ -1,0 +1,53 @@
+[
+  {
+    "flow": "ticker XSS attempt (NOTAREAL<script>alert(1)</script>)",
+    "console_messages": [
+      "[error] Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "[error] Error fetching ticker market data: Error: Could not fetch spot price for ticker NOTAREAL<SCRIPT>ALERT(1)</SCRIPT>. Please enter manually."
+    ],
+    "outcome": "Script tag was rendered as text (React-escaped). No XSS execution. UI uppercased the input. Backend rejected ticker with 400."
+  },
+  {
+    "flow": "ticker whitespace (   spy   )",
+    "console_messages": [
+      "[error] Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "[error] Error fetching ticker market data: Error: Could not fetch spot price for ticker    SPY. Please enter manually."
+    ],
+    "outcome": "Ticker NOT trimmed before fetch; whitespace round-trips and triggers 400."
+  },
+  {
+    "flow": "ticker Cyrillic А (U+0410) AAPL",
+    "console_messages": [
+      "[error] Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "[error] Error fetching ticker market data: Error: Could not fetch spot price for ticker АAPL. Please enter manually."
+    ],
+    "outcome": "Cyrillic A bypassed any ASCII filter. Mixed status across endpoints (400 spot, 200 dividend/historical)."
+  },
+  {
+    "flow": "ticker 5000-character string",
+    "console_messages": [
+      "[error] Failed to load resource: the server responded with a status of 400 (Bad Request)",
+      "[error] Error fetching ticker market data: ...5000xA... Please enter manually."
+    ],
+    "outcome": "5000-char URL accepted by frontend; spot endpoint 400, dividend/hv 200 (junk)."
+  },
+  {
+    "flow": "Spot edge values via JS (Infinity, NaN, 1,234.56, 1.234,56)",
+    "console_messages": [
+      "[warn] The specified value \"Infinity\" cannot be parsed, or is out of range.",
+      "[error] Received NaN for the `value` attribute. If this is expected, cast the value to a string.",
+      "[warn] The specified value \"NaN\" cannot be parsed, or is out of range.",
+      "[warn] The specified value \"1,234.56\" cannot be parsed, or is out of range.",
+      "[warn] The specified value \"1.234,56\" cannot be parsed, or is out of range."
+    ],
+    "outcome": "React emits NaN warning when the formData state slot ends up holding NaN (parseFloat('') case). The browser also rejects locale-formatted numbers and Infinity/NaN literals."
+  },
+  {
+    "flow": "Persistent a11y issues across all flows",
+    "console_messages": [
+      "[issue] No label associated with a form field (count: 75)",
+      "[issue] A form field element should have an id or name attribute (count: 76)"
+    ],
+    "outcome": "Cumulative tally across the session — every numeric/select input renders without id/htmlFor pairing or name attribute."
+  }
+]
