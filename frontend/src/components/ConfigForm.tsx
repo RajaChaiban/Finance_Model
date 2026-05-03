@@ -127,8 +127,14 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
     if (formData.daysToExpiration <= 0) {
       newErrors.daysToExpiration = "Days to expiration must be positive";
     }
-    if (formData.volatility <= 0 || formData.volatility > 1) {
-      newErrors.volatility = "Volatility must be between 0 and 1";
+    // Backend bound is 0 < σ ≤ 5.0 (was lt=1.0, raised to allow distressed
+    // single-names / post-event vol / crypto-linked products). Form input
+    // is in PERCENT (multiplied by 100 for display), so the user-visible
+    // bound is 0 < % ≤ 500. Keep this in lockstep with src/api/models.py
+    // PricingRequest.volatility.
+    if (formData.volatility <= 0 || formData.volatility > 5) {
+      newErrors.volatility =
+        "Volatility (%) must be between 0 and 500 — values above 200% are unusual outside post-event distressed names";
     }
     if (formData.nPaths < 100) {
       newErrors.nPaths = "Number of paths must be at least 100";
@@ -352,8 +358,10 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
                   handleChange("volatility", parseFloat(e.target.value) / 100)
                 }
                 step="0.1"
+                min="0"
+                max="500"
                 disabled={isLoading || fetchingMarketData}
-                title="Auto-fetched historical volatility (252-day)"
+                title="Volatility in percent (e.g., 20 = 20% = decimal 0.20). Backend cap is 500%."
               />
               {errors.volatility && (
                 <span className="error">{errors.volatility}</span>

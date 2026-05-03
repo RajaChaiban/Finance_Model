@@ -130,25 +130,40 @@ def build_iv_grid(
         if T <= 0:
             continue
 
-        # Per-strike preference: pick the OTM side (calls for K>S, puts for K<S).
-        # OTM quotes are more liquid and don't need to wash out the intrinsic
-        # before the time value shows up in the BS inversion.
+        # Per-strike preference: pick the OTM side (calls for K>S, puts for
+        # K<S). OTM quotes are more liquid and don't need to wash out the
+        # intrinsic before the time value shows up in the BS inversion.
+        # At exact ATM (K == S) both sides are at-the-money — average their
+        # inverted IVs when both are available; in clean data put-call parity
+        # makes them equal, but rounding/illiquidity bites.
         for K_val, sub in df.groupby("strike", sort=True):
             n_total += 1
-            preferred = sub[sub["option_type"] == ("call" if K_val >= S else "put")]
-            chosen = preferred if len(preferred) else sub
-            row = chosen.iloc[0]
-            iv = _invert_quote(
-                S=S,
-                K=float(K_val),
-                target_price=float(row["mid"]),
-                r=r,
-                T=T,
-                q=q,
-                option_type=str(row["option_type"]),
-            )
+            K_f = float(K_val)
+            if K_f == S:
+                # ATM tie: try both sides and average inverted IVs.
+                ivs: List[float] = []
+                for opt in ("call", "put"):
+                    side = sub[sub["option_type"] == opt]
+                    if not len(side):
+                        continue
+                    iv_side = _invert_quote(
+                        S=S, K=K_f, target_price=float(side.iloc[0]["mid"]),
+                        r=r, T=T, q=q, option_type=opt,
+                    )
+                    if iv_side is not None:
+                        ivs.append(iv_side)
+                iv = sum(ivs) / len(ivs) if ivs else None
+            else:
+                preferred_side = "call" if K_f > S else "put"
+                preferred = sub[sub["option_type"] == preferred_side]
+                chosen = preferred if len(preferred) else sub
+                row = chosen.iloc[0]
+                iv = _invert_quote(
+                    S=S, K=K_f, target_price=float(row["mid"]),
+                    r=r, T=T, q=q, option_type=str(row["option_type"]),
+                )
             if iv is not None:
-                rows.append((T, float(K_val), iv))
+                rows.append((T, K_f, iv))
                 n_ok += 1
 
     if n_total == 0:

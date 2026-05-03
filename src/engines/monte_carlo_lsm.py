@@ -16,15 +16,12 @@ Conventions match ``quantlib_engine.py``:
 import QuantLib as ql
 from typing import Tuple
 from . import black_scholes
+from ._ql_session import ql_locked, days_from_T as _days_from_T
 
 
 _CALENDAR = ql.UnitedStates(ql.UnitedStates.NYSE)
 _DAY_COUNT = ql.Actual365Fixed()
 _DEFAULT_SEED = 42  # fixed seed → common random numbers across bump-reprice Greeks
-
-
-def _days_from_T(T: float) -> int:
-    return max(int(T * 365.0 + 0.5), 1)
 
 
 def _build_process(S: float, r: float, sigma: float, q: float,
@@ -38,6 +35,7 @@ def _build_process(S: float, r: float, sigma: float, q: float,
     return ql.GeneralizedBlackScholesProcess(spot, q_ts, r_ts, v_ts)
 
 
+@ql_locked
 def price_american(S: float, K: float, r: float, sigma: float, T: float, q: float = 0,
                    n_paths: int = 10000, n_steps: int = 90,
                    variance_reduction: str = "none",
@@ -98,8 +96,10 @@ def price_american(S: float, K: float, r: float, sigma: float, T: float, q: floa
     return price, std_error, None
 
 
+@ql_locked
 def greeks_american(S: float, K: float, r: float, sigma: float, T: float, q: float = 0,
                     n_paths: int = 5000, n_steps: int = 45,
+                    variance_reduction: str = "antithetic",
                     option_type: str = "put") -> dict:
     """Bump-and-reprice Greeks with common random numbers (CRN).
 
@@ -108,12 +108,18 @@ def greeks_american(S: float, K: float, r: float, sigma: float, T: float, q: flo
     reflect parameter sensitivity rather than MC noise — this is the
     standard MC Greeks technique. Theta has partial CRN (T changes the
     time grid) and is intrinsically the noisiest Greek under MC.
+
+    ``variance_reduction`` is forwarded so the caller can guarantee the
+    bump-base ``"price"`` returned here matches what ``price_american``
+    returned with the same args. Previously this was hard-coded to
+    ``"antithetic"``, which meant the CLI path (default ``"none"``)
+    saw two different prices in one response.
     """
     def px(S_: float, r_: float, sigma_: float, T_: float, q_: float) -> float:
         p, _, _ = price_american(
             S_, K, r_, sigma_, T_, q_,
             n_paths=n_paths, n_steps=n_steps,
-            variance_reduction="antithetic",
+            variance_reduction=variance_reduction,
             option_type=option_type,
         )
         return p
@@ -127,22 +133,34 @@ def greeks_american(S: float, K: float, r: float, sigma: float, T: float, q: flo
     delta = (p_up - p_dn) / (2 * h)
     gamma = (p_up - 2 * price_base + p_dn) / (h * h)
 
-    # Vega: 1 vol-point bump, expressed per 1% absolute σ
+    # Vega: central difference, 1 vol-point bump, per 1% absolute σ.
     vol_bump = 0.01
     p_vu = px(S, r, sigma + vol_bump, T, q)
-    vega = (p_vu - price_base) / vol_bump / 100.0
+    p_vd = px(S, r, sigma - vol_bump, T, q)
+    vega = (p_vu - p_vd) / (2 * vol_bump) / 100.0
 
-    # Theta: per-calendar-day forward (matches QuantLib convention).
-    # T_down = T − 1/365 means "one day later"; for long options p_t_down < p_base
-    # → theta negative, as expected.
-    T_down = max(T - 1.0 / 365.0, 0.001)
-    p_t_down = px(S, r, sigma, T_down, q)
-    theta = p_t_down - price_base
+    # Theta: per-calendar-day forward.
+    # When T ≤ 1 day, the previous code clamped T_down to 0.001 ≈ 0.37 days,
+    # which is GREATER than T itself → theta computed as p(T_down) - p(T)
+    # had the wrong sign. Treat T ≤ 1 day as the contract being effectively
+    # at expiry: the holder loses (price_base − intrinsic) over T years,
+    # which over 1 day is approximately −price_base × (1/365) / T.
+    dT = 1.0 / 365.0
+    if T <= dT:
+        # Avoid the negative-step artefact: the only meaningful number is
+        # "how much will I lose tomorrow if I do nothing", and tomorrow is
+        # past expiry so it's the entire remaining time value plus path-
+        # exercise opportunity. Approximating as full price decay over T.
+        theta = -price_base if T > 0 else 0.0
+    else:
+        p_t_down = px(S, r, sigma, T - dT, q)
+        theta = p_t_down - price_base
 
-    # Rho: 1bp bump, expressed per 1% absolute r
+    # Rho: central difference, 1 vol-point bump, per 1% absolute r.
     rate_bump = 0.01
     p_ru = px(S, r + rate_bump, sigma, T, q)
-    rho = (p_ru - price_base) / rate_bump / 100.0
+    p_rd = px(S, r - rate_bump, sigma, T, q)
+    rho = (p_ru - p_rd) / (2 * rate_bump) / 100.0
 
     european_price = black_scholes.price_european(S, K, r, sigma, T, q, option_type)
     early_exercise_premium = price_base - european_price

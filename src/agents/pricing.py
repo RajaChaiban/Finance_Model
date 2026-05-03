@@ -15,6 +15,7 @@ memo time.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 from src.engines import router
@@ -70,25 +71,45 @@ class PricingAgent(BaseAgent):
         if self.mi is None or session.objective is None or not priced:
             return
         underlying = session.objective.underlying
+
+        # Per-candidate MI calls run in parallel — each is an I/O-bound LLM
+        # round-trip (1-3s typical, occasionally 30s+ under retries). With 3
+        # candidates, sequential = ~10s best, ~90s+ worst; 3-worker thread
+        # pool collapses that to the longest single call. Order of recording
+        # is preserved so the memo's citation list stays deterministic.
+        def _query(pc: PricedCandidate):
+            return pc, self.mi.query_pricing(
+                asset_class=underlying,
+                tranche_type=pc.candidate.kind.value,
+                deal_size=pc.candidate.notional_usd,
+                collateral_info={
+                    "structure_kind": pc.candidate.kind.value,
+                    "horizon_days": session.objective.horizon_days,
+                },
+            )
+
+        results: dict[str, Any] = {}  # candidate_id -> qr
+        with ThreadPoolExecutor(max_workers=min(len(priced), 3)) as pool:
+            futures = {pool.submit(_query, pc): pc for pc in priced}
+            for fut in as_completed(futures):
+                pc = futures[fut]
+                try:
+                    _, qr = fut.result()
+                    results[pc.candidate.candidate_id] = qr
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Pricing MI query_pricing failed for %s: %s",
+                        pc.candidate.candidate_id,
+                        exc,
+                    )
+
+        # Record in original priced[] order — concurrent completion shuffles
+        # ``as_completed``, but the memo expects the citation list to follow
+        # the canonical candidate ordering.
         for pc in priced:
-            try:
-                qr = self.mi.query_pricing(
-                    asset_class=underlying,
-                    tranche_type=pc.candidate.kind.value,
-                    deal_size=pc.candidate.notional_usd,
-                    collateral_info={
-                        "structure_kind": pc.candidate.kind.value,
-                        "horizon_days": session.objective.horizon_days,
-                    },
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Pricing MI query_pricing failed for %s: %s",
-                    pc.candidate.candidate_id,
-                    exc,
-                )
-                continue
-            self._record_market_context(session, intent="pricing", qr=qr)
+            qr = results.get(pc.candidate.candidate_id)
+            if qr is not None:
+                self._record_market_context(session, intent="pricing", qr=qr)
 
     # ------------------------------------------------------------------
     # Per-candidate

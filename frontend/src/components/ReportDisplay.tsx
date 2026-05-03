@@ -132,22 +132,68 @@ export function ReportDisplay({
         </div>
       </div>
 
-      {result.sigmaAtm !== undefined && result.sigmaAtm !== null && (
+      {/* Surface banner. Color-coded by ``surfaceStatus`` so the trader can
+          tell at a glance whether the smile is trustworthy. Statuses:
+            ok       → purple (default surface theme)
+            suspect  → amber  (build succeeded but σ implausible)
+            failed / empty_chain → red (fell back to flat-σ with a reason)
+          We render the banner whenever sigmaAtm exists OR the user opted in
+          but the surface didn't build (so they see the reason). */}
+      {(result.sigmaAtm !== undefined && result.sigmaAtm !== null) ||
+      (result.surfaceStatus &&
+        result.surfaceStatus !== "ok" &&
+        result.surfaceStatus !== "skipped") ? (
+        (() => {
+          const status = result.surfaceStatus ?? "ok";
+          const palette =
+            status === "suspect"
+              ? {
+                  bg: "linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(217, 119, 6, 0.08))",
+                  border: "1px solid rgba(245, 158, 11, 0.55)",
+                  shadow: "0 0 24px rgba(245, 158, 11, 0.12)",
+                  accent: "#f59e0b",
+                  label: "Surface SUSPECT",
+                }
+              : status === "failed" || status === "empty_chain"
+              ? {
+                  bg: "linear-gradient(90deg, rgba(239, 68, 68, 0.14), rgba(220, 38, 38, 0.08))",
+                  border: "1px solid rgba(239, 68, 68, 0.55)",
+                  shadow: "0 0 24px rgba(239, 68, 68, 0.12)",
+                  accent: "#ef4444",
+                  label:
+                    status === "empty_chain"
+                      ? "Surface unavailable (empty chain)"
+                      : "Surface build FAILED",
+                }
+              : {
+                  bg: "linear-gradient(90deg, rgba(139, 92, 246, 0.10), rgba(99, 102, 241, 0.08))",
+                  border: "1px solid rgba(139, 92, 246, 0.35)",
+                  shadow: "0 0 24px rgba(139, 92, 246, 0.08)",
+                  accent: "var(--accent-hover)",
+                  label: "Live IV surface",
+                };
+          return (
         <div
           className="surface-banner"
+          data-surface-status={status}
           style={{
             margin: "0.75rem 0",
             padding: "0.85rem 1.1rem",
             borderRadius: "8px",
-            background:
-              "linear-gradient(90deg, rgba(139, 92, 246, 0.10), rgba(99, 102, 241, 0.08))",
-            border: "1px solid rgba(139, 92, 246, 0.35)",
+            background: palette.bg,
+            border: palette.border,
             fontSize: "0.9rem",
             color: "var(--text-primary)",
-            boxShadow: "0 0 24px rgba(139, 92, 246, 0.08)",
+            boxShadow: palette.shadow,
           }}
         >
-          <strong style={{ color: "var(--accent-hover)" }}>Live IV surface</strong>
+          <strong style={{ color: palette.accent }}>{palette.label}</strong>
+          {result.surfaceFailureReason && (
+            <span style={{ color: "var(--text-muted)", marginLeft: "0.5rem" }}>
+              — {result.surfaceFailureReason}
+            </span>
+          )}
+          {result.sigmaAtm !== undefined && result.sigmaAtm !== null && <>
           {" — "}
           σ at strike:{" "}
           <strong style={{ color: "var(--text-primary)" }}>
@@ -178,8 +224,11 @@ export function ReportDisplay({
               </span>
             </>
           )}
+          </>}
         </div>
-      )}
+          );
+        })()
+      ) : null}
 
       {strike !== undefined && spot !== undefined && (
         <div className="vd-chart-grid">

@@ -31,33 +31,61 @@ export function CopilotPanel() {
   const [session, setSession] = useState<SessionView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const pollRef = useRef<number | null>(null);
+  // SSE subscription handle. Replaces the previous setInterval polling so
+  // state transitions reach the UI within one event-loop tick instead of
+  // up to 1s polling latency. The backend stream auto-closes when a gate is
+  // hit OR a terminal status is reached, at which point we close locally
+  // and re-subscribe after the next gate decision.
+  const esRef = useRef<EventSource | null>(null);
 
-  const stopPolling = () => {
-    if (pollRef.current !== null) {
-      window.clearInterval(pollRef.current);
-      pollRef.current = null;
+  const stopEvents = () => {
+    if (esRef.current !== null) {
+      esRef.current.close();
+      esRef.current = null;
     }
   };
 
+  // Always tear down the SSE subscription on unmount so we don't leak
+  // network connections when the user switches away from the Co-pilot tab.
   useEffect(() => {
-    return stopPolling;
+    return stopEvents;
   }, []);
 
-  const startPolling = (id: string) => {
-    stopPolling();
-    pollRef.current = window.setInterval(async () => {
+  const startEvents = (id: string) => {
+    stopEvents();
+    esRef.current = agentClient.subscribeToEvents(id, async (ev) => {
+      // Heartbeats are pure liveness signals — ignore.
+      if (ev.type === "heartbeat") return;
+
+      // Server closed the stream (gate or terminal). Refresh once so the UI
+      // shows the final pre-gate state, then drop the subscription.
+      if (ev.type === "stream_close") {
+        try {
+          setSession(await agentClient.getSession(id));
+        } catch {
+          /* swallow — we're tearing down anyway */
+        }
+        stopEvents();
+        return;
+      }
+
+      // For every other state-bearing event (agent_started, agent_finished,
+      // gate_pending, market_context, error, done, cancelled), refresh the
+      // session view from the source of truth. The event payload itself is
+      // a notification, not a delta — pulling the full SessionView keeps
+      // the rendering logic dead-simple.
       try {
         const s = await agentClient.getSession(id);
         setSession(s);
         if (TERMINAL_STATUSES.has(s.status) || AWAITING_STATUSES.has(s.status)) {
-          stopPolling();
+          stopEvents();
         }
-      } catch (e: any) {
-        setError(e?.message ?? String(e));
-        stopPolling();
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg);
+        stopEvents();
       }
-    }, 1000);
+    });
   };
 
   const handleStart = async () => {
@@ -73,10 +101,11 @@ export function CopilotPanel() {
       const s = await agentClient.getSession(session_id);
       setSession(s);
       if (!TERMINAL_STATUSES.has(s.status) && !AWAITING_STATUSES.has(s.status)) {
-        startPolling(session_id);
+        startEvents(session_id);
       }
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
     } finally {
       setBusy(false);
     }
@@ -94,19 +123,22 @@ export function CopilotPanel() {
         !TERMINAL_STATUSES.has(next.status) &&
         !AWAITING_STATUSES.has(next.status)
       ) {
-        startPolling(session.session_id);
+        // Re-subscribe — the previous SSE connection was closed by the
+        // server when it hit the gate the user just decided.
+        startEvents(session.session_id);
       } else {
-        stopPolling();
+        stopEvents();
       }
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
     } finally {
       setBusy(false);
     }
   };
 
   const handleReset = () => {
-    stopPolling();
+    stopEvents();
     setSession(null);
     setError(null);
   };

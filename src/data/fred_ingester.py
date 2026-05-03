@@ -98,8 +98,35 @@ def _fetch_latest_observation(
             r = httpx.get(FRED_BASE_URL, params=params, timeout=timeout_s)
         r.raise_for_status()
         payload = r.json()
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("FRED fetch failed for %s: %s", series_id, exc)
+    except httpx.HTTPStatusError as exc:
+        # Distinguish so the desk can react to auth/rate-limit (4xx) vs.
+        # server outage (5xx). Previously a single catch-all logged the same
+        # line for "API key revoked" and "FRED is down for maintenance".
+        status = exc.response.status_code
+        if status == 401:
+            logger.error("FRED auth failed for %s (HTTP 401) — check FRED_API_KEY", series_id)
+        elif status == 429:
+            logger.warning("FRED rate-limited for %s (HTTP 429); skipping", series_id)
+        elif 500 <= status < 600:
+            logger.warning("FRED server error for %s (HTTP %d); skipping", series_id, status)
+        else:
+            logger.warning("FRED HTTP %d for %s: %s", status, series_id, exc)
+        return None
+    except httpx.RequestError as exc:
+        # Network-level failure (timeout, DNS, connection refused).
+        logger.warning("FRED network error for %s: %s", series_id, exc)
+        return None
+    except (KeyError, ValueError) as exc:
+        # Schema drift (FRED changed field names) or malformed JSON.
+        logger.error("FRED schema/parse error for %s: %s — investigate API change", series_id, exc)
+        return None
+    except Exception as exc:  # noqa: BLE001 - intentional residual catch
+        # Anything else we hadn't anticipated — log loudly so the next
+        # operator can either narrow this to the right httpx/json error type
+        # or fix the underlying cause. Returning None preserves the function's
+        # documented "never raise" contract that callers (and tests) rely on.
+        logger.warning("FRED unexpected error for %s: %s (%s)",
+                       series_id, exc, type(exc).__name__)
         return None
 
     obs = payload.get("observations") or []

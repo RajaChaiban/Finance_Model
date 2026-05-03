@@ -94,19 +94,26 @@ def to_continuous_act365(quoted_rate: float, basis: QuoteBasis) -> float:
     raise ValueError(f"Unsupported quote basis: {basis}")
 
 
-def treasury_basis_for_tenor_days(days: int) -> QuoteBasis:
+def treasury_basis_for_tenor_days(days: int, *, strict: bool = False) -> QuoteBasis:
     """Return the quote basis that Yahoo/Bloomberg uses for a US Treasury tenor.
 
-    - ≤ 365 days: T-bills (^IRX), quoted as money-market yield on Act/360.
-      Strictly Yahoo's ^IRX reports the *discount* yield, but for sub-1Y SOFR-
-      adjacent uses the simple act/360 interpretation gives sub-bp differences
-      and is the more common practitioner shorthand. Use ACT360_DISCOUNT if
-      precision matters at the tenor boundary.
+    - ≤ 365 days: T-bills (^IRX). Yahoo's ^IRX strictly reports the *discount*
+      yield (ACT360_DISCOUNT). The simple act/360 interpretation gives sub-bp
+      differences in normal regimes and is the practitioner shorthand —
+      kept as the default for backwards compatibility with the existing
+      treasury-yield handler. Set ``strict=True`` for institutional-grade
+      pricing where the few-bp differential at high rates matters.
     - > 365 days: T-notes/bonds (^TNX 10Y, ^TYX 30Y), quoted as bond-equivalent
       yield (semi-annual compounding).
+
+    Args:
+        days: Tenor in calendar days.
+        strict: If True, route ≤365-day tenors to ``ACT360_DISCOUNT`` (the
+            quote convention Yahoo's ^IRX actually uses). Defaults to False
+            for backwards compatibility.
     """
     if days <= 365:
-        return QuoteBasis.ACT360_SIMPLE
+        return QuoteBasis.ACT360_DISCOUNT if strict else QuoteBasis.ACT360_SIMPLE
     return QuoteBasis.BEY_SEMIANNUAL
 
 

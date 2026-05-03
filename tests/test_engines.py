@@ -329,7 +329,7 @@ class TestMarketDataScaling:
         class FakeTicker:
             def __init__(self, ticker):
                 self.ticker = ticker
-            def history(self, period):
+            def history(self, period=None, **kwargs):
                 # 6 months of trivial price data so vol code paths run
                 idx = pd.date_range("2025-01-01", periods=130, freq="B")
                 return pd.DataFrame({"Close": np.linspace(100, 110, 130)}, index=idx)
@@ -360,7 +360,7 @@ class TestMarketDataScaling:
 
         class FakeTicker:
             def __init__(self, ticker): self.ticker = ticker
-            def history(self, period):
+            def history(self, period=None, **kwargs):
                 # ~125 trading days = ~6 months — enough for vol_90d
                 idx = pd.date_range("2025-01-01", periods=130, freq="B")
                 rng = np.random.default_rng(0)

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Optional
 
 from .base import BaseAgent
@@ -91,7 +92,8 @@ class ValidatorAgent(BaseAgent):
         if self.mi is None or session.objective is None or not session.priced:
             return
         underlying = session.objective.underlying
-        for pc in session.priced:
+
+        def _query(pc: PricedCandidate):
             deal_summary = {
                 "structure": pc.candidate.name,
                 "kind": pc.candidate.kind.value,
@@ -103,20 +105,36 @@ class ValidatorAgent(BaseAgent):
                 "net_premium_bps": round(pc.net_premium_bps, 1),
                 "delta": round(pc.greeks.delta, 3),
             }
-            try:
-                qr = self.mi.query_deal_analysis(
-                    deal_summary=deal_summary,
-                    asset_class=underlying,
-                )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "Validator MI query_deal_analysis failed for %s: %s",
-                    pc.candidate.candidate_id,
-                    exc,
-                )
+            return pc, self.mi.query_deal_analysis(
+                deal_summary=deal_summary,
+                asset_class=underlying,
+            )
+
+        # Run all 3 candidates' deal-analysis MI calls in parallel.
+        # Each is an LLM round-trip (1-3s typical, occasionally 30s+ on
+        # retries). Sequential = ~10s; parallel = max(longest single call).
+        results: dict[str, Any] = {}  # candidate_id -> qr
+        with ThreadPoolExecutor(max_workers=min(len(session.priced), 3)) as pool:
+            futures = {pool.submit(_query, pc): pc for pc in session.priced}
+            for fut in as_completed(futures):
+                pc = futures[fut]
+                try:
+                    _, qr = fut.result()
+                    results[pc.candidate.candidate_id] = qr
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Validator MI query_deal_analysis failed for %s: %s",
+                        pc.candidate.candidate_id,
+                        exc,
+                    )
+
+        # Process results in priced[] order so memo citations and findings
+        # appear in canonical order regardless of which thread finished first.
+        for pc in session.priced:
+            qr = results.get(pc.candidate.candidate_id)
+            if qr is None:
                 continue
             self._record_market_context(session, intent="deal_analysis", qr=qr)
-
             answer = getattr(qr, "answer", "") or ""
             if any(p.search(answer) for p in _NO_PRECEDENT_PATTERNS):
                 report.findings.append(

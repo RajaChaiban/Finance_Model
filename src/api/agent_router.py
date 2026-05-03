@@ -19,7 +19,7 @@ import json
 import logging
 from typing import Any, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse
 
 try:
@@ -71,22 +71,47 @@ def _gate_for_path(letter: str) -> Gate:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/sessions", response_model=StartSessionResponse)
-async def start_session(req: StartSessionRequest) -> StartSessionResponse:
+@router.post("/sessions", response_model=StartSessionResponse, status_code=202)
+async def start_session(
+    req: StartSessionRequest, background_tasks: BackgroundTasks
+) -> StartSessionResponse:
+    """Create the session shell synchronously, kick off the pipeline in a
+    background task, and return ``202 Accepted + session_id`` immediately.
+
+    The previous behaviour ran intake (an LLM call) inside the request
+    handler, blocking the POST for 30-60s. The frontend's "Run" button
+    appeared frozen while the user waited, often triggering refresh
+    storms. Now the POST returns in <100ms and the client subscribes to
+    ``GET /sessions/{id}/events`` (SSE) for real-time progress.
+    """
     if not req.intake_form and not req.intake_nl:
         raise HTTPException(
             status_code=400, detail="Provide intake_form, intake_nl, or both."
         )
     orch = get_orchestrator()
-    session = await asyncio.to_thread(
-        orch.start_session,
+    # Create the session shell synchronously so we can return its id; the
+    # store has it before we exit, so a fast SSE subscription cannot race
+    # against the first ``agent_started`` event (the queue buffers).
+    session = orch.create_session_shell(
         intake_form=req.intake_form,
         intake_nl=req.intake_nl,
     )
+    # Schedule the heavy work (intake → regime → strategist) to run after
+    # the response is sent. BackgroundTasks runs on the same event loop's
+    # thread pool, so the orchestrator's ``_safe_advance`` (which is sync
+    # blocking work) is wrapped in ``asyncio.to_thread`` to avoid blocking
+    # the loop.
+    async def _kickoff() -> None:
+        await asyncio.to_thread(orch.advance_async, session.session_id)
+    background_tasks.add_task(_kickoff)
     return StartSessionResponse(
         session_id=session.session_id,
         status=session.status.value,
-        message=f"Started; current status {session.status.value}.",
+        message=(
+            f"Session created (status={session.status.value}); "
+            f"intake running in background — subscribe to "
+            f"/api/agent/sessions/{session.session_id}/events for progress."
+        ),
     )
 
 

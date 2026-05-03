@@ -166,6 +166,13 @@ class OrchestratorAgent:
         intake_form: Optional[dict] = None,
         intake_nl: Optional[str] = None,
     ) -> StructuringSession:
+        """Create a session AND run intake synchronously.
+
+        Kept for backwards compatibility (tests, CLI demos, anything that
+        wants the parsed objective before returning). The HTTP layer should
+        prefer ``create_session_shell`` + ``advance_async`` so the request
+        does not block on the LLM.
+        """
         session = StructuringSession(intake_form=intake_form, intake_nl=intake_nl)
         self.store.add(session)
         self._emit(session, "session_created", "Session created.")
@@ -173,6 +180,38 @@ class OrchestratorAgent:
         # is the parsed objective.
         self._safe_advance(session.session_id)
         return self.store.get(session.session_id) or session
+
+    def create_session_shell(
+        self,
+        *,
+        intake_form: Optional[dict] = None,
+        intake_nl: Optional[str] = None,
+    ) -> StructuringSession:
+        """Create the session, register it in the store, but do NOT advance.
+
+        Returns immediately so the HTTP POST can respond ``202 Accepted +
+        session_id`` and the client can subscribe to the SSE event stream
+        before the first agent has even started — no race where the client
+        misses the ``intake_started`` event.
+
+        Pair with ``advance_async(session_id)`` (typically scheduled as a
+        FastAPI BackgroundTask) to run the actual pipeline.
+        """
+        session = StructuringSession(intake_form=intake_form, intake_nl=intake_nl)
+        self.store.add(session)
+        self._emit(session, "session_created", "Session created.")
+        return session
+
+    def advance_async(self, session_id: str) -> None:
+        """Advance the session through the state machine.
+
+        Designed to be invoked via ``fastapi.BackgroundTasks`` (or any
+        worker thread). Errors are caught by ``_safe_advance`` and surfaced
+        as an ``error`` event on the SSE queue + ``status=ERROR`` in the
+        store; this method itself never raises so a background-task failure
+        cannot crash the worker pool.
+        """
+        self._safe_advance(session_id)
 
     def decide_gate(
         self,

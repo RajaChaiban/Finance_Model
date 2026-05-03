@@ -188,7 +188,9 @@ def get_historical_volatility(
         end_date = datetime.now()
         start_date = end_date - timedelta(days=lookback_days + 30)
 
-        hist = stock.history(start=start_date, end=end_date)
+        # auto_adjust=True so dividend ex-dates and stock splits don't appear
+        # as huge log-returns that contaminate realized vol.
+        hist = stock.history(start=start_date, end=end_date, auto_adjust=True)
 
         if hist.empty or len(hist) < 20:
             logger.warning(f"Insufficient data for {ticker}, defaulting to 0.20")

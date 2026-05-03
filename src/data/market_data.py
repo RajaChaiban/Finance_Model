@@ -1,6 +1,7 @@
 """Market data fetching and calibration."""
 
 import logging
+import threading
 import time
 import numpy as np
 from datetime import datetime, timedelta
@@ -10,7 +11,14 @@ logger = logging.getLogger(__name__)
 
 
 class MarketDataCache:
-    """In-memory cache for market data with TTL support."""
+    """In-memory cache for market data with TTL support.
+
+    Thread-safe: a single ``RLock`` guards the underlying dict so concurrent
+    FastAPI request handlers cannot race on get/set/del. Without this,
+    ``del self._cache[key]`` from one thread can collide with another's
+    ``self._cache[key]`` read and raise ``RuntimeError: dictionary changed
+    size during iteration``.
+    """
 
     def __init__(self, ttl_seconds: int = 3600):
         """Initialize cache.
@@ -19,7 +27,8 @@ class MarketDataCache:
             ttl_seconds: Time-to-live for cached values (default 1 hour)
         """
         self.ttl_seconds = ttl_seconds
-        self._cache = {}
+        self._cache: Dict[str, tuple] = {}
+        self._lock = threading.RLock()
 
     def get(self, key: str) -> Optional[Dict]:
         """Get cached value if not stale.
@@ -30,15 +39,15 @@ class MarketDataCache:
         Returns:
             Cached value or None if not found or expired
         """
-        if key not in self._cache:
-            return None
-
-        value, timestamp = self._cache[key]
-        if datetime.now().timestamp() - timestamp > self.ttl_seconds:
-            del self._cache[key]
-            return None
-
-        return value
+        with self._lock:
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            value, timestamp = entry
+            if datetime.now().timestamp() - timestamp > self.ttl_seconds:
+                del self._cache[key]
+                return None
+            return value
 
     def set(self, key: str, value: Dict) -> None:
         """Store value in cache with timestamp.
@@ -47,14 +56,21 @@ class MarketDataCache:
             key: Cache key
             value: Value to cache
         """
-        self._cache[key] = (value, datetime.now().timestamp())
+        with self._lock:
+            self._cache[key] = (value, datetime.now().timestamp())
 
     def clear(self) -> None:
         """Clear all cached values."""
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
 
 
-_market_cache = MarketDataCache(ttl_seconds=3600)
+# A 1-hour TTL on the unified bundle is too long for spot (which moves every
+# second) but appropriate for dividend yield. Splitting the cache by data type
+# is a deeper refactor — for now we use the shorter of the relevant horizons
+# (60s) so spot stays fresh; the cost is one extra yfinance call per minute
+# for the same ticker, which is well within rate limits.
+_market_cache = MarketDataCache(ttl_seconds=60)
 
 
 def fetch_market_params(
@@ -109,38 +125,72 @@ def fetch_market_params(
         try:
             logger.info(f"Fetching market data for {ticker}: attempt {attempt + 1}/{max_retries}")
 
-            # Fetch stock data with timeout
+            # Fetch stock data with timeout. yfinance >= 0.2.x accepts
+            # ``timeout=`` on .history(); pass it through so a hung DNS or
+            # network issue does not lock a request handler indefinitely.
             stock = yf.Ticker(ticker)
 
-            # Spot price (most recent close)
-            hist = stock.history(period="1d")
+            # Spot price (most recent close).
+            # auto_adjust=True so the close is consistent with the long-history
+            # call below (we don't want adjusted vs unadjusted closes to drift).
+            hist = stock.history(period="1d", auto_adjust=True, timeout=timeout)
             if not hist.empty:
                 params["spot_price"] = float(hist["Close"].iloc[-1])
                 logger.debug(f"Fetched spot price: ${params['spot_price']:.2f}")
 
-            # Dividend yield. yfinance >= 0.2.x returns this as a percentage
-            # (e.g. 1.14 means 1.14%); we want a decimal for the pricing engines.
+            # Dividend yield. The yfinance scaling for this field has flipped
+            # historically across versions: 0.2.x returned percent (1.14 →
+            # 1.14%), some 0.2.32+ builds return decimal (0.0114 → 1.14%).
+            # Smell-test: a "yield" above 0.20 (20% — higher than any real
+            # equity dividend) almost certainly means the field is already
+            # in percent form and we should rescale; below 0.20 we treat as
+            # decimal directly. A genuine 20% dividend is a corp-action
+            # outlier worth flagging anyway.
             info = stock.info
-            if "dividendYield" in info and info["dividendYield"]:
-                params["dividend_yield"] = float(info["dividendYield"]) / 100.0
-                logger.debug(f"Fetched dividend yield: {params['dividend_yield']:.2%}")
+            raw_div = info.get("dividendYield")
+            if raw_div:
+                raw_div_f = float(raw_div)
+                if raw_div_f > 0.20:
+                    # almost certainly percent-encoded — rescale
+                    params["dividend_yield"] = raw_div_f / 100.0
+                    logger.debug(
+                        f"yfinance dividendYield {raw_div_f} interpreted as percent "
+                        f"-> decimal {params['dividend_yield']:.4%}"
+                    )
+                else:
+                    params["dividend_yield"] = raw_div_f
+                    logger.debug(
+                        f"yfinance dividendYield {raw_div_f} interpreted as decimal "
+                        f"-> {params['dividend_yield']:.4%}"
+                    )
 
-            # Historical volatility — need ~6 months to compute a 90-day window
-            hist_long = stock.history(period="6mo")
+            # Historical volatility. auto_adjust=True is critical: without it,
+            # dividend ex-dates and stock splits show up as huge log-returns
+            # and manufacture fake volatility. A 2:1 split day produces a
+            # log(0.5) ≈ -69% return that on its own annualises to ~110%
+            # spurious vol. With auto_adjust, the price series is back-
+            # adjusted for both, leaving only true returns.
+            hist_long = stock.history(period="6mo", auto_adjust=True, timeout=timeout)
             if len(hist_long) > 1:
                 returns = np.log(hist_long["Close"] / hist_long["Close"].shift(1)).dropna()
 
-                # 30-day realized vol
+                # The keys are named "30d / 90d" but the windows are TRADING-
+                # day counts: tail(30) on a daily-business-day yfinance series
+                # selects the last 30 trading days (~6 calendar weeks).
+                # Annualisation uses √252 trading days/year, so the units are
+                # consistent. ``.std()`` defaults to ddof=1 (sample std);
+                # for σ estimation under GBM the textbook is ddof=0 with the
+                # sample mean fixed at 0 — the bias for N=30 is ~1.7% and
+                # within the noise of typical IV/realized-vol divergence.
                 if len(returns) >= 30:
                     vol_30 = returns.tail(30).std() * np.sqrt(252)
                     params["volatility_30d"] = float(vol_30)
-                    logger.debug(f"Computed 30-day volatility: {params['volatility_30d']:.2%}")
+                    logger.debug(f"Computed 30-trading-day volatility: {params['volatility_30d']:.2%}")
 
-                # 90-day realized vol
                 if len(returns) >= 90:
                     vol_90 = returns.tail(90).std() * np.sqrt(252)
                     params["volatility_90d"] = float(vol_90)
-                    logger.debug(f"Computed 90-day volatility: {params['volatility_90d']:.2%}")
+                    logger.debug(f"Computed 90-trading-day volatility: {params['volatility_90d']:.2%}")
 
             params["source"] = "api"
             logger.info(f"Successfully fetched market data for {ticker}")
@@ -170,7 +220,8 @@ def fetch_market_params(
 def compute_historical_vol(
     ticker: str,
     window: int = 90,
-    max_retries: int = 3
+    max_retries: int = 3,
+    timeout: int = 10,
 ) -> Optional[float]:
     """Compute historical volatility from past returns.
 
@@ -178,8 +229,13 @@ def compute_historical_vol(
 
     Args:
         ticker: Stock ticker
-        window: Number of days to use (default 90)
+        window: Number of days of returns to use. Note: this is a
+            BUSINESS-DAY count when applied to ``returns.tail(window)`` since
+            yfinance returns one row per trading day. The annualisation uses
+            ``√252`` (trading days/year), so ``window`` of 252 is a 1-year
+            sample.
         max_retries: Number of retry attempts
+        timeout: Per-request timeout in seconds (forwarded to yfinance).
 
     Returns:
         Annualized volatility, or None if fetch fails
@@ -195,7 +251,9 @@ def compute_historical_vol(
             logger.debug(f"Computing historical volatility for {ticker} ({window}-day window): attempt {attempt + 1}/{max_retries}")
 
             stock = yf.Ticker(ticker)
-            hist = stock.history(period="6mo")
+            # auto_adjust=True so dividend ex-dates and splits don't show up
+            # as enormous log-returns that inflate the realized-vol estimate.
+            hist = stock.history(period="6mo", auto_adjust=True, timeout=timeout)
 
             if len(hist) < window:
                 logger.warning(f"Insufficient data for {ticker} ({len(hist)} days < {window} days)")

@@ -164,7 +164,7 @@ def greeks_knockout(S: float, K: float, B: float, r: float, sigma: float, T: flo
     price_base, vanilla_base, adj_base, _ = price_knockout(S, K, B, r, sigma, T, q, option_type,
                                                             monitoring=monitoring)
 
-    # Delta
+    # Delta — central difference in spot.
     bump_pct = 0.01
     S_up = S * (1 + bump_pct)
     S_down = S * (1 - bump_pct)
@@ -172,26 +172,34 @@ def greeks_knockout(S: float, K: float, B: float, r: float, sigma: float, T: flo
     price_down, _, _, _ = price_knockout(S_down, K, B, r, sigma, T, q, option_type, monitoring=monitoring)
     delta = (price_up - price_down) / (S_up - S_down)
 
-    # Gamma
-    price_base_2, _, _, _ = price_knockout(S, K, B, r, sigma, T, q, option_type, monitoring=monitoring)
-    delta_up = (price_up - price_base_2) / (S_up - S)
-    delta_down = (price_base_2 - price_down) / (S - S_down)
+    # Gamma — second central difference; reuse price_base (no need to reprice).
+    delta_up = (price_up - price_base) / (S_up - S)
+    delta_down = (price_base - price_down) / (S - S_down)
     gamma = (delta_up - delta_down) / (S_up - S_down)
 
-    # Vega
+    # Vega — central difference, per 1% absolute σ.
     vol_bump = 0.01
     price_vol_up, _, _, _ = price_knockout(S, K, B, r, sigma + vol_bump, T, q, option_type, monitoring=monitoring)
-    vega = (price_vol_up - price_base) / vol_bump / 100
+    price_vol_down, _, _, _ = price_knockout(S, K, B, r, sigma - vol_bump, T, q, option_type, monitoring=monitoring)
+    vega = (price_vol_up - price_vol_down) / (2 * vol_bump) / 100
 
-    # Theta
-    T_down = max(T - 1 / 365, 0.001)
-    price_t_down, _, _, _ = price_knockout(S, K, B, r, sigma, T_down, q, option_type, monitoring=monitoring)
-    theta = (price_t_down - price_base) / (T_down - T)
+    # Theta — per CALENDAR DAY (not per year). The previous code divided by
+    # (T_down − T), normalising to per-year and breaking the cross-engine
+    # convention documented in architecture.md. All other engines return
+    # `p_t_down − price_base` directly.
+    dT = 1.0 / 365.0
+    if T <= dT:
+        theta = -price_base if T > 0 else 0.0
+    else:
+        price_t_down, _, _, _ = price_knockout(S, K, B, r, sigma, T - dT, q,
+                                                option_type, monitoring=monitoring)
+        theta = price_t_down - price_base
 
-    # Rho
+    # Rho — central difference, per 1% absolute r.
     rate_bump = 0.01
     price_r_up, _, _, _ = price_knockout(S, K, B, r + rate_bump, sigma, T, q, option_type, monitoring=monitoring)
-    rho = (price_r_up - price_base) / rate_bump / 100
+    price_r_down, _, _, _ = price_knockout(S, K, B, r - rate_bump, sigma, T, q, option_type, monitoring=monitoring)
+    rho = (price_r_up - price_r_down) / (2 * rate_bump) / 100
 
     # Barrier discount
     barrier_discount_pct = (1 - adj_base) * 100

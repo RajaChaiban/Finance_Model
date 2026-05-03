@@ -14,9 +14,15 @@ class PricingRequest(BaseModel):
     spot_price: float = Field(..., gt=0, description="Current spot price")
     strike_price: float = Field(..., gt=0, description="Strike price")
     days_to_expiration: int = Field(..., gt=0, description="Days until expiration")
-    risk_free_rate: float = Field(default=0.045, description="Risk-free rate (annual)")
-    volatility: float = Field(..., gt=0, lt=1, description="Volatility (0-1)")
-    dividend_yield: float = Field(default=0.015, description="Dividend yield (annual)")
+    risk_free_rate: float = Field(default=0.045, ge=-0.05, le=0.50,
+                                   description="Risk-free rate (annual, decimal). Allows negative for EUR/JPY.")
+    # Upper bound 5.0 mirrors the IV solver's bracket (solver.py). Distressed
+    # single-names, post-event vol, and crypto-linked products routinely run
+    # above 100%; the prior gt=0/lt=1 cap rejected valid pricing requests.
+    volatility: float = Field(..., gt=0.0, le=5.0,
+                               description="Volatility (annual, decimal; 0 < σ ≤ 5.0)")
+    dividend_yield: float = Field(default=0.015, ge=0.0, le=0.50,
+                                   description="Dividend yield (annual, decimal)")
 
     # Pricing configuration
     n_paths: int = Field(default=10000, description="Number of Monte Carlo paths")
@@ -63,7 +69,25 @@ class PricingResult(BaseModel):
     option_type: str = Field(..., description="Option type")
     pricing_timestamp: str = Field(..., description="ISO timestamp of pricing")
 
-    # Surface diagnostics (populated only when use_vol_surface=True succeeded).
+    # Surface diagnostics. ``surface_status`` is ALWAYS set so the client can
+    # distinguish the five outcomes:
+    #   "skipped"      - request.use_vol_surface was False; flat-σ used by design
+    #   "ok"           - surface built and consumed by the engine
+    #   "suspect"      - surface built but sigma_atm exceeds sanity bound
+    #                    (typically post-event single-name with quote noise);
+    #                    the price IS computed against this surface but the UI
+    #                    should warn the user that the σ is implausible
+    #   "empty_chain"  - chain fetched but had no usable rows (illiquid name)
+    #   "failed"       - exception during surface build; fell back to flat-σ
+    # Without this field, "failed" silently masquerades as "skipped" and the
+    # trader sees no banner that the surface toggle was honored as a soft
+    # preference rather than a contract.
+    surface_status: Literal["skipped", "ok", "suspect", "failed", "empty_chain"] = Field(
+        default="skipped", description="Vol-surface build outcome"
+    )
+    surface_failure_reason: Optional[str] = Field(
+        None, description="Exception message when surface_status == 'failed'"
+    )
     sigma_used: Optional[float] = Field(None, description="σ actually fed to the closed-form engine")
     sigma_atm: Optional[float] = Field(None, description="Surface σ at strike")
     sigma_barrier: Optional[float] = Field(None, description="Surface σ at barrier (KO only)")

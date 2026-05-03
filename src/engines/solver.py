@@ -21,9 +21,52 @@ def _solver_steps(T: float) -> int:
 
     Old policy (``int(T * 100)``) gave 5 steps for a 3-week option — far below
     LR-tree convergence. New policy floors at 101 (≈ 4-month business-day
-    daily) and scales linearly with T. For 1Y → 252; for 5Y → 1260.
+    daily) and scales linearly with T. For 1Y → 252; for 5Y → 1260. Capped
+    at 2000 to bound runtime on multi-decade tenors (very rare in equity
+    options but possible in long-dated structured products).
     """
-    return max(101, int(252 * T))
+    return min(2000, max(101, int(252 * T)))
+
+
+def _brentq(objective, a: float, b: float, xtol: float) -> Tuple[float, int]:
+    """Run brentq with ``full_output=True`` and return (root, real iteration count).
+
+    Previously every SolverResult reported ``iterations=100`` because that was
+    the maxiter ceiling, not the actual count. RootResults exposes the real
+    number — surface it so reports show meaningful diagnostic info.
+    """
+    root, results = brentq(objective, a, b, xtol=xtol, maxiter=100, full_output=True)
+    return float(root), int(results.iterations)
+
+
+def _expand_bracket(objective, a: float, b: float,
+                     factor: float = 2.0, max_expansions: int = 3) -> Tuple[float, float]:
+    """Expand (a, b) outward until the objective straddles zero.
+
+    Used as a one-shot retry when the user's default bracket is too narrow.
+    Returns the first (a', b') where ``objective(a') * objective(b') < 0``.
+    Raises ``ValueError`` if no straddle found within ``max_expansions``.
+
+    The midpoint stays fixed; only the half-width grows by ``factor`` each
+    expansion. This preserves the user's intent (centred at S, etc.) while
+    catching cases where the target price sits just outside the bracket.
+    """
+    midpoint = 0.5 * (a + b)
+    half_width = 0.5 * (b - a)
+    for _ in range(max_expansions):
+        f_a, f_b = objective(a), objective(b)
+        if f_a * f_b < 0 and not (np.isinf(f_a) or np.isinf(f_b)):
+            return a, b
+        half_width *= factor
+        a = midpoint - half_width
+        b = midpoint + half_width
+        # Floor positive-only quantities at a small epsilon; brentq doesn't
+        # accept negative S/K and the objective will explode if we cross zero.
+        a = max(a, 1e-6 * midpoint) if midpoint > 0 else a
+    raise ValueError(
+        f"Bracket [{a:.4g}, {b:.4g}] does not straddle zero after "
+        f"{max_expansions} expansions; target may be unachievable."
+    )
 
 
 class SolverResult:
@@ -104,12 +147,16 @@ def solve_for_strike(S: float, target_price: float, r: float, sigma: float, T: f
             price, _, _ = quantlib_engine.price_american_ql(S, K, r, sigma, T, q,
                                                             _solver_steps(T), option_type)
             return price - target_price
-        except:
+        except (RuntimeError, ValueError):
+            # Bracket-hostile inputs (negative-only K, σ outside QL bounds): push
+            # the bracket outward by returning +inf so brentq narrows the search.
             return float('inf')
 
     try:
-        # Use Brent's method for robust 1D root finding
-        K_solution = brentq(objective, K_min, K_max, xtol=tolerance, maxiter=100)
+        # Try the original bracket first; expand outward once if it doesn't
+        # straddle zero (target outside default range).
+        K_min, K_max = _expand_bracket(objective, K_min, K_max)
+        K_solution, n_iters = _brentq(objective, K_min, K_max, xtol=tolerance)
 
         # Verify solution
         actual_price, _, _ = quantlib_engine.price_american_ql(S, K_solution, r, sigma, T, q,
@@ -120,7 +167,7 @@ def solve_for_strike(S: float, target_price: float, r: float, sigma: float, T: f
             value=K_solution,
             target_price=target_price,
             actual_price=actual_price,
-            iterations=100,  # Brent's method iterations not exposed, use upper bound
+            iterations=n_iters,
             converged=abs(actual_price - target_price) < tolerance * 2,
             original_params={'S': S, 'r': r, 'sigma': sigma, 'T': T, 'q': q, 'option_type': option_type}
         )
@@ -176,7 +223,7 @@ def solve_for_barrier(S: float, K: float, target_price: float, r: float, sigma: 
         try:
             price, _, _ = quantlib_engine.price_knockout_ql(S, K, B, r, sigma, T, q, option_type)
             return price - target_price
-        except:
+        except (RuntimeError, ValueError):
             return float('inf')
 
     try:
@@ -192,7 +239,7 @@ def solve_for_barrier(S: float, K: float, target_price: float, r: float, sigma: 
             )
 
         # Use Brent's method
-        B_solution = brentq(objective, B_min, B_max, xtol=tolerance, maxiter=100)
+        B_solution, n_iters = _brentq(objective, B_min, B_max, xtol=tolerance)
 
         # Verify solution
         actual_price, _, _ = quantlib_engine.price_knockout_ql(S, K, B_solution, r, sigma, T, q, option_type)
@@ -202,7 +249,7 @@ def solve_for_barrier(S: float, K: float, target_price: float, r: float, sigma: 
             value=B_solution,
             target_price=target_price,
             actual_price=actual_price,
-            iterations=100,
+            iterations=n_iters,
             converged=abs(actual_price - target_price) < tolerance * 2,
             original_params={'S': S, 'K': K, 'r': r, 'sigma': sigma, 'T': T, 'q': q,
                            'option_type': option_type, 'barrier_type': barrier_type}
@@ -245,11 +292,11 @@ def solve_for_expiration(S: float, K: float, target_price: float, r: float, sigm
             price, _, _ = quantlib_engine.price_american_ql(S, K, r, sigma, T, q,
                                                             _solver_steps(T), option_type)
             return price - target_price
-        except:
+        except (RuntimeError, ValueError):
             return float('inf')
 
     try:
-        T_solution = brentq(objective, T_min, T_max, xtol=tolerance/1000, maxiter=100)
+        T_solution, n_iters = _brentq(objective, T_min, T_max, xtol=tolerance / 1000)
 
         # Verify solution
         actual_price, _, _ = quantlib_engine.price_american_ql(S, K, r, sigma, T_solution, q,
@@ -260,7 +307,7 @@ def solve_for_expiration(S: float, K: float, target_price: float, r: float, sigm
             value=T_solution * 365,  # Convert to days for user-friendly output
             target_price=target_price,
             actual_price=actual_price,
-            iterations=100,
+            iterations=n_iters,
             converged=abs(actual_price - target_price) < tolerance * 2,
             original_params={'S': S, 'K': K, 'r': r, 'sigma': sigma, 'q': q, 'option_type': option_type}
         )
@@ -321,7 +368,7 @@ def solve_for_volatility_european(S: float, K: float, target_price: float, r: fl
             f"Likely an arbitrage violation in the input price."
         )
 
-    sigma_solution = brentq(objective, vol_min, vol_max, xtol=tolerance, maxiter=100)
+    sigma_solution, n_iters = _brentq(objective, vol_min, vol_max, xtol=tolerance)
     actual_price = black_scholes.price_european(S, K, r, sigma_solution, T, q, option_type)
 
     # Convergence is on σ (Brent's root-finding); price residual just confirms the inversion
@@ -332,7 +379,7 @@ def solve_for_volatility_european(S: float, K: float, target_price: float, r: fl
         value=sigma_solution,
         target_price=target_price,
         actual_price=actual_price,
-        iterations=100,
+        iterations=n_iters,
         converged=price_residual < max(target_price * 1e-4, 1e-6),
         original_params={'S': S, 'K': K, 'r': r, 'T': T, 'q': q, 'option_type': option_type}
     )
@@ -410,11 +457,11 @@ def solve_for_volatility_american(S: float, K: float, target_price: float, r: fl
             price, _, _ = quantlib_engine.price_american_ql(S, K, r, sigma, T, q,
                                                             n_steps, option_type)
             return price - target_price
-        except:
+        except (RuntimeError, ValueError):
             return float('inf')
 
     try:
-        sigma_solution = brentq(objective, vol_min, vol_max, xtol=0.0001, maxiter=100)
+        sigma_solution, n_iters = _brentq(objective, vol_min, vol_max, xtol=0.0001)
 
         actual_price, _, _ = quantlib_engine.price_american_ql(S, K, r, sigma_solution, T, q,
                                                                n_steps, option_type)
@@ -424,7 +471,7 @@ def solve_for_volatility_american(S: float, K: float, target_price: float, r: fl
             value=sigma_solution,
             target_price=target_price,
             actual_price=actual_price,
-            iterations=100,
+            iterations=n_iters,
             converged=abs(actual_price - target_price) < tolerance * 2,
             original_params={'S': S, 'K': K, 'r': r, 'T': T, 'q': q, 'option_type': option_type}
         )

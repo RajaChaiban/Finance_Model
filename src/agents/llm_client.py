@@ -18,10 +18,13 @@ Strategist's rules-table system prompt to cut cost.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -76,6 +79,69 @@ class LLMResult:
 class LLMUnavailableError(RuntimeError):
     """Raised when the SDK isn't installed or no API key is configured AND
     DEMO_REPLAY is not enabled."""
+
+
+# ---------------------------------------------------------------------------
+# Optional in-process LRU cache for identical prompts.
+# Opt-in via env: LLM_CACHE=1 (default off).
+#
+# Why opt-in: prompts at temperature=0.2 are mostly deterministic so re-issuing
+# the same prompt across sessions (common for repeat demos and identical RFQs)
+# can serve from cache and skip the provider round-trip entirely. The
+# ClaudeCodeProvider's per-call subprocess overhead (5-10s) is the killer this
+# is meant to neutralise. Off by default because a stale cache hit can mislead
+# during creative iteration ("the LLM said the same thing again — is it
+# stuck?"); explicit opt-in keeps the surprise low.
+# ---------------------------------------------------------------------------
+_CACHE_LOCK = threading.RLock()
+_CACHE_MAXSIZE = int(os.getenv("LLM_CACHE_MAXSIZE", "256"))
+_LLM_CACHE: "OrderedDict[str, LLMResult]" = OrderedDict()
+
+
+def _cache_enabled() -> bool:
+    return os.getenv("LLM_CACHE", "").strip() in {"1", "true", "True"}
+
+
+def _cache_key(provider_name: str, model: str, prompt: str, json_mode: bool) -> str:
+    """Stable hash of the inputs that determine the LLM's output."""
+    h = hashlib.sha256()
+    h.update(provider_name.encode("utf-8"))
+    h.update(b"\x1f")
+    h.update(model.encode("utf-8"))
+    h.update(b"\x1f")
+    h.update(b"json" if json_mode else b"text")
+    h.update(b"\x1f")
+    h.update(prompt.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _cache_get(key: str) -> Optional["LLMResult"]:
+    with _CACHE_LOCK:
+        if key not in _LLM_CACHE:
+            return None
+        # Move to MRU position
+        _LLM_CACHE.move_to_end(key)
+        return _LLM_CACHE[key]
+
+
+def _cache_put(key: str, value: "LLMResult") -> None:
+    with _CACHE_LOCK:
+        _LLM_CACHE[key] = value
+        _LLM_CACHE.move_to_end(key)
+        while len(_LLM_CACHE) > _CACHE_MAXSIZE:
+            _LLM_CACHE.popitem(last=False)
+
+
+def llm_cache_clear() -> None:
+    """Test/dev helper: drop everything in the prompt cache."""
+    with _CACHE_LOCK:
+        _LLM_CACHE.clear()
+
+
+def llm_cache_stats() -> dict[str, int]:
+    """Test/dev helper: snapshot cache size + max."""
+    with _CACHE_LOCK:
+        return {"size": len(_LLM_CACHE), "maxsize": _CACHE_MAXSIZE}
 
 
 class LLMClient:
@@ -224,6 +290,33 @@ class LLMClient:
                 )
             mt = max_tokens or self.cfg.max_output_tokens
 
+            # In-process cache short-circuit. Hit = skip the provider entirely
+            # (which for ClaudeCodeProvider saves a 5-10s subprocess spawn).
+            # Cache key is a hash of (provider, model, prompt, json_mode)
+            # so different prompts always miss. Off by default; opt in via
+            # env var ``LLM_CACHE=1``.
+            cache_key: Optional[str] = None
+            if _cache_enabled():
+                cache_key = _cache_key(
+                    self._provider.name, model, full_prompt, json_mode
+                )
+                cached = _cache_get(cache_key)
+                if cached is not None:
+                    logger.debug(
+                        "%s LLM cache HIT (provider=%s model=%s)",
+                        agent_name, self._provider.name, model,
+                    )
+                    # Return a fresh LLMResult with latency=0 so the audit
+                    # trail tells the truth about no-network calls.
+                    return LLMResult(
+                        text=cached.text,
+                        parsed_json=cached.parsed_json,
+                        tool_calls=cached.tool_calls,
+                        stop_reason=cached.stop_reason,
+                        model=cached.model,
+                        latency_s=0.0,
+                    )
+
             last_err: Optional[Exception] = None
             for attempt in range(self.cfg.max_retries + 1):
                 try:
@@ -233,7 +326,7 @@ class LLMClient:
                     )
                     latency = time.time() - start
                     parsed = self._safe_json(text) if (json_mode and text) else None
-                    return LLMResult(
+                    result = LLMResult(
                         text=text or "",
                         parsed_json=parsed,
                         tool_calls=[],
@@ -241,6 +334,9 @@ class LLMClient:
                         model=model,
                         latency_s=latency,
                     )
+                    if cache_key is not None and text:
+                        _cache_put(cache_key, result)
+                    return result
                 except Exception as exc:  # noqa: BLE001
                     last_err = exc
                     if attempt >= self.cfg.max_retries:
@@ -282,6 +378,32 @@ class LLMClient:
             **{k: v for k, v in config_kwargs.items() if v is not None}
         )
 
+        # Same opt-in cache as the non-Gemini path. Gemini is fast (~1-2s)
+        # so the per-call gain here is smaller than for ClaudeCode, but
+        # repeat-RFQ demos and identical-prompt MI calls still benefit.
+        # Cache key composes system + user text so a system-instruction
+        # change invalidates correctly.
+        gemini_cache_key: Optional[str] = None
+        if _cache_enabled():
+            full_prompt = (
+                f"{system_text}\n\n{user_text}" if system_text else user_text
+            )
+            gemini_cache_key = _cache_key("gemini", model, full_prompt, json_mode)
+            cached = _cache_get(gemini_cache_key)
+            if cached is not None:
+                logger.debug(
+                    "%s LLM cache HIT (provider=gemini model=%s)",
+                    agent_name, model,
+                )
+                return LLMResult(
+                    text=cached.text,
+                    parsed_json=cached.parsed_json,
+                    tool_calls=cached.tool_calls,
+                    stop_reason=cached.stop_reason,
+                    model=cached.model,
+                    latency_s=0.0,
+                )
+
         last_err: Optional[Exception] = None
         for attempt in range(self.cfg.max_retries + 1):
             try:
@@ -292,7 +414,10 @@ class LLMClient:
                     config=config,
                 )
                 latency = time.time() - start
-                return self._build_result(response, model, latency, json_mode)
+                result = self._build_result(response, model, latency, json_mode)
+                if gemini_cache_key is not None and result.text:
+                    _cache_put(gemini_cache_key, result)
+                return result
 
             except Exception as exc:  # noqa: BLE001 — SDK exception classes vary
                 last_err = exc

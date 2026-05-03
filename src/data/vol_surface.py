@@ -42,6 +42,7 @@ import numpy as np
 import QuantLib as ql
 
 from src.data.iv_grid import IVGrid
+from src.engines._ql_session import days_from_T
 
 logger = logging.getLogger(__name__)
 
@@ -49,18 +50,28 @@ logger = logging.getLogger(__name__)
 _DAY_COUNTER = ql.Actual365Fixed()
 _CALENDAR = ql.UnitedStates(ql.UnitedStates.NYSE)
 
+# Cap extrapolated wing IVs at this percentile of in-grid IVs. Edge holes
+# (typically deep-OTM strikes that didn't invert) get filled by nearest-
+# neighbour np.interp, which on a steep smile means the deepest-OTM
+# inverted IV gets pinned across an entire dead zone. Capping at p95 keeps
+# the surface stable on the wings without distorting the bulk.
+_WING_FILL_PERCENTILE = 95.0
+
 
 def _to_ql_date(d: date) -> ql.Date:
     return ql.Date(d.day, d.month, d.year)
 
 
 def _fill_nan_along_strike(iv: np.ndarray, strikes: np.ndarray) -> np.ndarray:
-    """Linear-in-strike interpolation per expiry; edge holes get nearest neighbour.
+    """Linear-in-strike interpolation per expiry; edge holes get nearest neighbour
+    and are then capped at the per-row 95th percentile of valid IVs.
 
-    QuantLib BlackVarianceSurface requires a fully-populated matrix. Holes
-    only exist where a single mid refused to invert; the surface is well
-    behaved everywhere else, so cell-level interpolation along strike is
-    the safest fix.
+    QuantLib BlackVarianceSurface requires a fully-populated matrix. Interior
+    holes are well-handled by ``np.interp``; edge holes get the boundary value
+    extrapolated as a constant. On a steep put-wing that constant can be a
+    50%+ IV slammed across every dead strike below the deepest in-grid one,
+    which manufactures spurious wing risk. Cap at p95 of valid in-row IVs
+    so the surface stays stable.
     """
     out = iv.copy()
     for t in range(out.shape[0]):
@@ -73,7 +84,12 @@ def _fill_nan_along_strike(iv: np.ndarray, strikes: np.ndarray) -> np.ndarray:
         if mask.sum() == len(row):
             continue
         idx = np.arange(len(row))
-        out[t] = np.interp(idx, idx[mask], row[mask])
+        filled = np.interp(idx, idx[mask], row[mask])
+        # Cap fills (only the cells we just filled) at p95 of valid IVs.
+        cap = float(np.percentile(row[mask], _WING_FILL_PERCENTILE))
+        fill_mask = ~mask
+        filled[fill_mask] = np.minimum(filled[fill_mask], cap)
+        out[t] = filled
     return out
 
 
@@ -108,8 +124,12 @@ def build_vol_surface(
     today = ref_date if ref_date is not None else date.today()
     ql_today = _to_ql_date(today)
 
+    # Use the engine's shared days_from_T (round-half-up, floor at 1) so the
+    # surface's expiry dates align bit-for-bit with what the pricing engines
+    # see. Python's built-in round() is banker's rounding, which can drift
+    # by 1 day at half-integer T relative to the engines.
     expiry_dates = [
-        _to_ql_date(today + timedelta(days=int(round(T * 365.0))))
+        _to_ql_date(today + timedelta(days=days_from_T(T)))
         for T in grid.expiries
     ]
 

@@ -18,40 +18,43 @@ Conventions
   is 0.5 day = ~0.00137 yr; for typical equity options this gives sub-half-cent
   drift vs an "exact-T" closed-form. To eliminate drift entirely, drive the
   pipeline from real trade/expiry dates.
+- Thread safety: every public function acquires the shared QL lock via
+  ``ql_session`` for the full pricing duration. The evaluation date is a
+  process-global; without serialization, concurrent FastAPI requests with
+  different evaluation_dates race and the loser silently uses the winner's
+  date. See ``_ql_session.py``.
 """
+
+import logging
 
 import numpy as np
 import QuantLib as ql
 from typing import Dict, Optional, Tuple
 
-
-def _days_from_T(T: float) -> int:
-    """Convert T (years) to integer days. Round-half-up, floor at 1 day.
-
-    Why round-half-up (not floor, not banker's): floor biases T_eff DOWN by up
-    to a full day. Banker's rounding (Python's built-in `round`) is unbiased
-    on average but breaks the common case T=N/2/365 (e.g. T=0.5 → 182.5d →
-    182d under banker's). Round-half-up gives consistent ±0.5 day bound.
-    """
-    return max(int(T * 365.0 + 0.5), 1)
+from ._ql_session import ql_locked, ql_session, days_from_T as _days_from_T
 
 
-def _setup_evaluation_date(evaluation_date: Optional[ql.Date]) -> ql.Date:
-    """Set QL global evaluation date and return it.
-
-    None → use today's date. Allows aged-trade revaluation when caller
-    passes a specific date.
-    """
-    if evaluation_date is None:
-        evaluation_date = ql.Date.todaysDate()
-    ql.Settings.instance().evaluationDate = evaluation_date
-    return evaluation_date
+logger = logging.getLogger(__name__)
 
 
 # US equity option calendar (NYSE). Replace ql.TARGET() (EUR) which is wrong
 # for US markets — TARGET observes Easter/Labour Day differently and skips
 # Christmas Eve, all of which break theta-over-weekend computations.
 _US_EQUITY_CALENDAR = ql.UnitedStates(ql.UnitedStates.NYSE)
+
+
+def _setup_evaluation_date(evaluation_date: Optional[ql.Date]) -> ql.Date:
+    """Set QL global evaluation date and return it.
+
+    REQUIRES the caller to hold the QL lock (e.g. via the ``@ql_locked``
+    decorator on the enclosing public function). The decorator also handles
+    restoring the previous date on exit, so this helper is now a pure setter.
+    None → today's date.
+    """
+    if evaluation_date is None:
+        evaluation_date = ql.Date.todaysDate()
+    ql.Settings.instance().evaluationDate = evaluation_date
+    return evaluation_date
 
 
 def _resolve_vol_handle(
@@ -81,6 +84,7 @@ _BARRIER_TYPE_MAP = {
 }
 
 
+@ql_locked
 def price_knockout_ql(S: float, K: float, B: float, r: float, sigma: float,
                       T: float, q: float, option_type: str,
                       evaluation_date: Optional[ql.Date] = None,
@@ -128,8 +132,17 @@ def price_knockout_ql(S: float, K: float, B: float, r: float, sigma: float,
     if barrier_kind not in ("out", "in"):
         raise ValueError(f"barrier_kind must be 'out' or 'in', got {barrier_kind!r}")
     try:
+        # CONTRACT direction is a property of the original barrier vs spot —
+        # capture it BEFORE the BGK shift overwrites B. With a large daily
+        # shift on a near-the-spot barrier, the shifted B can land on the
+        # opposite side of S, which would flip the direction enum and produce
+        # a contractually-wrong barrier type.
+        b_is_below_s_original = (B < S)
+
         # Apply BGK shift before any QL setup so the engine sees the corrected
-        # barrier. Note: shift uses ORIGINAL barrier-vs-spot direction.
+        # barrier. Note: shift uses ORIGINAL barrier-vs-spot direction (the
+        # bgk_adjusted_barrier helper takes the original B and infers eta
+        # from the same original B vs S).
         from .knockout import _resolve_monitoring, bgk_adjusted_barrier
         monitoring_dt = _resolve_monitoring(monitoring)
         if monitoring_dt > 0:
@@ -142,8 +155,8 @@ def price_knockout_ql(S: float, K: float, B: float, r: float, sigma: float,
             payoff = ql.PlainVanillaPayoff(ql.Option.Call, K)
         else:
             payoff = ql.PlainVanillaPayoff(ql.Option.Put, K)
-        # Direction is set by barrier-vs-spot, kind (in/out) by caller.
-        barrier_type = _BARRIER_TYPE_MAP[(barrier_kind, B < S)]
+        # Direction (Down/Up) is fixed by ORIGINAL B vs S, not the shifted B.
+        barrier_type = _BARRIER_TYPE_MAP[(barrier_kind, b_is_below_s_original)]
 
         exercise = ql.EuropeanExercise(maturity)
         rebate = 0.0
@@ -185,6 +198,7 @@ def price_knockout_ql(S: float, K: float, B: float, r: float, sigma: float,
         raise ValueError(f"QuantLib knockout pricing failed: {e}")
 
 
+@ql_locked
 def price_american_ql(S: float, K: float, r: float, sigma: float, T: float,
                       q: float, n_steps: int = 100, option_type: str = 'put',
                       evaluation_date: Optional[ql.Date] = None,
@@ -248,6 +262,7 @@ def price_american_ql(S: float, K: float, r: float, sigma: float, T: float,
         raise ValueError(f"QuantLib American pricing failed: {e}")
 
 
+@ql_locked
 def price_american_discrete_div_ql(
     S: float, K: float, r: float, sigma: float, T: float,
     dividend_schedule, option_type: str = 'put',
@@ -308,10 +323,12 @@ def price_american_discrete_div_ql(
     return float(option.NPV()), 0.0, None
 
 
+@ql_locked
 def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
               option_type: str = 'put', is_american: bool = False,
               evaluation_date: Optional[ql.Date] = None,
               vol_handle: Optional[ql.BlackVolTermStructureHandle] = None,
+              n_steps: int = 201,
               ) -> Dict[str, float]:
     """
     Calculate Greeks using QuantLib.
@@ -326,9 +343,14 @@ def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
         option_type: 'call' or 'put'
         is_american: Use American exercise if True, European otherwise
         evaluation_date: QL evaluation date (None → today)
+        n_steps: Binomial-tree step count (American only). Forward this from
+            the price call to keep ``"price"`` here in lockstep with the
+            price endpoint. Defaults to 201 (the previous hardcoded value)
+            for backward compatibility, but the router now forwards the
+            caller's n_steps so price + greeks no longer disagree.
 
     Returns:
-        Dictionary of Greeks: delta, gamma, vega, theta, rho
+        Dictionary of Greeks: delta, gamma, vega, theta, rho, price
     """
     try:
         today = _setup_evaluation_date(evaluation_date)
@@ -360,9 +382,11 @@ def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
 
         process = ql.GeneralizedBlackScholesProcess(spot_quote, dividend_ts, risk_free_ts, vol_ts)
 
-        # Engine
+        # Engine — match price_american_ql's odd-step + min-51 policy so the
+        # bump-base price equals what the price endpoint returned.
         if is_american:
-            engine = ql.BinomialVanillaEngine(process, "lr", 201)
+            steps = n_steps if n_steps % 2 == 1 else n_steps + 1
+            engine = ql.BinomialVanillaEngine(process, "lr", max(steps, 51))
         else:
             engine = ql.AnalyticEuropeanEngine(process)
 
@@ -373,21 +397,38 @@ def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
             "price": float(option.NPV()),
         }
 
-        # Try to calculate each Greek, skip if not supported by engine
+        # Delta and gamma are exposed by every engine we use here
+        # (AnalyticEuropeanEngine + BinomialVanillaEngine). Failure here means
+        # a real numerical or engine-misconfiguration bug — surface it as nan
+        # rather than silently reporting 0.0, which would let the report
+        # pretend a flat hedge is correct.
         try:
             greeks["delta"] = float(option.delta())
-        except:
-            greeks["delta"] = 0.0
+        except RuntimeError as exc:
+            logger.warning(
+                "QL delta() failed for %s %s: %s; reporting nan",
+                "American" if is_american else "European", option_type, exc,
+            )
+            greeks["delta"] = float("nan")
 
         try:
             greeks["gamma"] = float(option.gamma())
-        except:
-            greeks["gamma"] = 0.0
+        except RuntimeError as exc:
+            logger.warning(
+                "QL gamma() failed for %s %s: %s; reporting nan",
+                "American" if is_american else "European", option_type, exc,
+            )
+            greeks["gamma"] = float("nan")
 
+        # Vega/theta/rho: the LR binomial engine intentionally does not expose
+        # these (only the analytic European engine does). RuntimeError here is
+        # the documented signal to fall back to bump-reprice. Catching only
+        # RuntimeError prevents KeyboardInterrupt/SystemExit from being silently
+        # swallowed.
         try:
             # QuantLib vega is per 1.0 absolute change in σ; divide by 100 for per-1%
             greeks["vega"] = float(option.vega()) / 100.0
-        except:
+        except RuntimeError:
             greeks["vega"] = _calculate_vega_bump_reprice(
                 S, K, r, sigma, T, q, option_type, is_american
             )
@@ -395,7 +436,7 @@ def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
         try:
             # QuantLib theta is per-year decay; divide by 365 for daily
             greeks["theta"] = float(option.theta()) / 365.0
-        except:
+        except RuntimeError:
             greeks["theta"] = _calculate_theta_bump_reprice(
                 S, K, r, sigma, T, q, option_type, is_american
             )
@@ -403,7 +444,7 @@ def greeks_ql(S: float, K: float, r: float, sigma: float, T: float, q: float,
         try:
             # QuantLib rho is per 1.0 absolute change in r; divide by 100 for per-1%
             greeks["rho"] = float(option.rho()) / 100.0
-        except:
+        except RuntimeError:
             greeks["rho"] = _calculate_rho_bump_reprice(
                 S, K, r, sigma, T, q, option_type, is_american
             )
@@ -445,28 +486,38 @@ def _price_for_bump(S: float, K: float, r: float, sigma: float, T: float, q: flo
 
 def _calculate_vega_bump_reprice(S: float, K: float, r: float, sigma: float, T: float,
                                   q: float, option_type: str, is_american: bool) -> float:
-    """Vega via central-difference bump-reprice. Returns per 1% absolute σ move."""
+    """Vega via central-difference bump-reprice. Returns per 1% absolute σ move.
+
+    Returns nan on QL engine failure — silently returning 0 would be a hedge-
+    flattening lie.
+    """
     try:
         epsilon = 0.005  # 0.5 vol-points absolute
         price_up = _price_for_bump(S, K, r, sigma + epsilon, T, q, option_type, is_american)
         price_down = _price_for_bump(S, K, r, sigma - epsilon, T, q, option_type, is_american)
         return float((price_up - price_down) / (2 * epsilon) * 0.01)
-    except Exception:
-        return 0.0
+    except RuntimeError as exc:
+        logger.warning("vega bump-reprice failed: %s; reporting nan", exc)
+        return float("nan")
 
 
 def _calculate_theta_bump_reprice(S: float, K: float, r: float, sigma: float, T: float,
                                    q: float, option_type: str, is_american: bool) -> float:
-    """Theta via forward-difference bump-reprice. Returns per-day decay."""
+    """Theta via forward-difference bump-reprice. Returns per-day decay.
+
+    For T <= 1 day the option is at expiry — returns 0 as a contract decision,
+    not an error. Other failures surface as nan.
+    """
+    dT = 1.0 / 365.0
+    if T <= dT:
+        return 0.0
     try:
-        dT = 1.0 / 365.0
-        if T <= dT:
-            return 0.0
         price_now = _price_for_bump(S, K, r, sigma, T, q, option_type, is_american)
         price_tomorrow = _price_for_bump(S, K, r, sigma, T - dT, q, option_type, is_american)
         return float(price_tomorrow - price_now)
-    except Exception:
-        return 0.0
+    except RuntimeError as exc:
+        logger.warning("theta bump-reprice failed: %s; reporting nan", exc)
+        return float("nan")
 
 
 def _calculate_rho_bump_reprice(S: float, K: float, r: float, sigma: float, T: float,
@@ -477,8 +528,9 @@ def _calculate_rho_bump_reprice(S: float, K: float, r: float, sigma: float, T: f
         price_up = _price_for_bump(S, K, r + epsilon, sigma, T, q, option_type, is_american)
         price_down = _price_for_bump(S, K, r - epsilon, sigma, T, q, option_type, is_american)
         return float((price_up - price_down) / (2 * epsilon) * 0.01)
-    except Exception:
-        return 0.0
+    except RuntimeError as exc:
+        logger.warning("rho bump-reprice failed: %s; reporting nan", exc)
+        return float("nan")
 
 
 def _price_american_fdm(S: float, K: float, r: float, sigma: float, T: float, q: float,
@@ -504,6 +556,7 @@ def _price_american_fdm(S: float, K: float, r: float, sigma: float, T: float, q:
     return float(option.NPV())
 
 
+@ql_locked
 def greeks_american_fdm_ql(
     S: float, K: float, r: float, sigma: float, T: float, q: float,
     option_type: str = 'put', n_t_steps: int = 200, n_x_steps: int = 200,
@@ -579,6 +632,7 @@ def greeks_american_fdm_ql(
     }
 
 
+@ql_locked
 def greeks_knockout_ql(S: float, K: float, B: float, r: float, sigma: float, T: float,
                         q: float, option_type: str = 'call',
                         monitoring="continuous",
@@ -621,12 +675,30 @@ def greeks_knockout_ql(S: float, K: float, B: float, r: float, sigma: float, T: 
     p_base, _, _ = price_knockout_ql(S, K, B, r, sigma, T, q, option_type,
                                      monitoring=monitoring, barrier_kind=barrier_kind)
 
+    # Adaptive bump h. Default is 0.5% of S (or $0.01 floor); near the barrier
+    # we shrink it so both bump points stay on the same side. The previous
+    # 1e-4 hard floor was too aggressive — on a $100 stock that's 0.0001,
+    # below the AnalyticBarrierEngine's noise floor (~1e-3 of S), turning
+    # central-difference Greeks into pure numerical noise. Floor at 1bp of S
+    # so the bump stays within engine accuracy. When S sits *on* the barrier
+    # (distance ≈ 0), one of the bumps must straddle the barrier — log a
+    # warning that Greeks at this pin point are smile/pin-risk-dominated and
+    # accept the resulting noise rather than refusing (downstream callers,
+    # incl. existing combination tests, expect a non-NaN Greek dict).
     h_default = max(S * 0.005, 0.01)
     distance_to_barrier = abs(S - B)
-    if 2 * h_default > 0.5 * distance_to_barrier:
-        h = max(0.25 * distance_to_barrier, 1e-4)
-    else:
+    h_engine_floor = max(S * 0.001, 1e-3)  # ~engine accuracy
+
+    if 2 * h_default <= 0.5 * distance_to_barrier:
         h = h_default
+    else:
+        h = max(0.25 * distance_to_barrier, h_engine_floor)
+        if distance_to_barrier < h_engine_floor:
+            logger.warning(
+                "S=%.4f is within engine floor of barrier B=%.4f; "
+                "bump-reprice Greeks dominated by pin risk and unreliable",
+                S, B,
+            )
     p_up, _, _ = price_knockout_ql(S + h, K, B, r, sigma, T, q, option_type,
                                    monitoring=monitoring, barrier_kind=barrier_kind)
     p_dn, _, _ = price_knockout_ql(S - h, K, B, r, sigma, T, q, option_type,

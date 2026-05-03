@@ -79,11 +79,13 @@ class PricingConfig:
         if self.dividend_yield < 0:
             errors.append(f"dividend_yield cannot be negative, got {self.dividend_yield}")
 
-        # Volatility
+        # Volatility. Upper bound 5.0 matches the API model and the IV
+        # solver bracket (solver.py). Distressed single-names, post-event vol,
+        # and crypto-linked products routinely run above 100%.
         if self.volatility <= 0:
             errors.append(f"volatility must be > 0, got {self.volatility}")
-        if self.volatility > 1.0:
-            errors.append(f"volatility seems too high ({self.volatility:.0%}), expected < 100%")
+        if self.volatility > 5.0:
+            errors.append(f"volatility {self.volatility:.0%} exceeds 500% — fat-finger guard")
 
         # Monte Carlo
         if self.n_paths <= 0:

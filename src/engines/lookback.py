@@ -23,17 +23,14 @@ Conventions match the rest of ``src/engines/``:
 """
 
 import QuantLib as ql
-from typing import Tuple
+from typing import Optional, Tuple
 
 from . import black_scholes
+from ._ql_session import ql_locked, days_from_T as _days_from_T
 
 
 _CALENDAR = ql.UnitedStates(ql.UnitedStates.NYSE)
 _DAY_COUNT = ql.Actual365Fixed()
-
-
-def _days_from_T(T: float) -> int:
-    return max(int(T * 365.0 + 0.5), 1)
 
 
 def _build_process(S: float, r: float, sigma: float, q: float,
@@ -56,9 +53,13 @@ def _ql_option_type(option_type: str) -> int:
     raise ValueError(f"option_type must be 'call' or 'put', got {option_type!r}")
 
 
+@ql_locked
 def price_lookback(S: float, K: float, r: float, sigma: float, T: float,
                    q: float = 0.0, option_type: str = "call",
-                   lookback_type: str = "fixed") -> Tuple[float, float, None]:
+                   lookback_type: str = "fixed",
+                   evaluation_date: Optional[ql.Date] = None,
+                   maturity_date: Optional[ql.Date] = None,
+                   ) -> Tuple[float, float, None]:
     """Price a lookback option (fixed or floating strike).
 
     Args:
@@ -66,9 +67,11 @@ def price_lookback(S: float, K: float, r: float, sigma: float, T: float,
         K: strike (fixed) OR running extremum (floating, see module docstring)
         option_type: 'call' or 'put'
         lookback_type: 'fixed' or 'floating'
-
-    Returns:
-        (price, std_error, None). std_error == 0.0 (analytic).
+        evaluation_date: Override today's date (theta/aged-trade revaluation).
+        maturity_date: Pin the maturity date instead of computing from T.
+            Used by ``greeks_lookback`` so theta-by-date-advance keeps the
+            look-back window endpoint constant — bumping T directly would
+            shrink the window, which is a contract change.
     """
     lt = lookback_type.lower()
     if lt not in ("fixed", "floating"):
@@ -76,9 +79,9 @@ def price_lookback(S: float, K: float, r: float, sigma: float, T: float,
             f"lookback_type must be 'fixed' or 'floating', got {lookback_type!r}"
         )
 
-    today = ql.Date.todaysDate()
+    today = evaluation_date if evaluation_date is not None else ql.Date.todaysDate()
     ql.Settings.instance().evaluationDate = today
-    maturity = today + _days_from_T(T)
+    maturity = maturity_date if maturity_date is not None else today + _days_from_T(T)
 
     process = _build_process(S, r, sigma, q, today)
     exercise = ql.EuropeanExercise(maturity)
@@ -105,6 +108,7 @@ def price_lookback(S: float, K: float, r: float, sigma: float, T: float,
     return float(option.NPV()), 0.0, None
 
 
+@ql_locked
 def greeks_lookback(S: float, K: float, r: float, sigma: float, T: float,
                     q: float = 0.0, option_type: str = "call",
                     lookback_type: str = "fixed") -> dict:
@@ -114,10 +118,16 @@ def greeks_lookback(S: float, K: float, r: float, sigma: float, T: float,
     Bump steps match ``quantlib_engine.py``: ±1% relative S for delta/gamma,
     ±1% absolute σ for vega, ±1% absolute r for rho, +1 calendar day for theta.
     """
-    def px(S_, r_, sigma_, T_, q_) -> float:
+    # Pin contract definition: today + maturity date held constant for every
+    # bump so spot/vol/rate Greeks see the SAME look-back window.
+    today = ql.Date.todaysDate()
+    maturity = today + _days_from_T(T)
+
+    def px(S_, r_, sigma_, T_unused_, q_) -> float:
         p, _, _ = price_lookback(
-            S_, K, r_, sigma_, T_, q_,
+            S_, K, r_, sigma_, T, q_,
             option_type=option_type, lookback_type=lookback_type,
+            evaluation_date=today, maturity_date=maturity,
         )
         return p
 
@@ -129,17 +139,28 @@ def greeks_lookback(S: float, K: float, r: float, sigma: float, T: float,
     delta = (p_up - p_dn) / (2 * h)
     gamma = (p_up - 2 * price_base + p_dn) / (h * h)
 
+    # Vega — central, per 1% absolute σ.
     vol_bump = 0.01
     p_vu = px(S, r, sigma + vol_bump, T, q)
-    vega = (p_vu - price_base) / vol_bump / 100.0
+    p_vd = px(S, r, sigma - vol_bump, T, q)
+    vega = (p_vu - p_vd) / (2 * vol_bump) / 100.0
 
-    T_down = max(T - 1.0 / 365.0, 0.001)
-    p_t_down = px(S, r, sigma, T_down, q)
-    theta = p_t_down - price_base
+    # Theta — advance evaluation date by 1 day, KEEP MATURITY constant so the
+    # look-back window endpoint doesn't move. Bumping T directly used to also
+    # shrink the look-back window, which is a contract change masquerading as
+    # decay.
+    p_tomorrow, _, _ = price_lookback(
+        S, K, r, sigma, T, q,
+        option_type=option_type, lookback_type=lookback_type,
+        evaluation_date=today + 1, maturity_date=maturity,
+    )
+    theta = p_tomorrow - price_base
 
+    # Rho — central, per 1% absolute r.
     rate_bump = 0.01
     p_ru = px(S, r + rate_bump, sigma, T, q)
-    rho = (p_ru - price_base) / rate_bump / 100.0
+    p_rd = px(S, r - rate_bump, sigma, T, q)
+    rho = (p_ru - p_rd) / (2 * rate_bump) / 100.0
 
     # Compare to vanilla European at same K (only meaningful for fixed-strike).
     european_price = black_scholes.price_european(S, K, r, sigma, T, q, option_type)

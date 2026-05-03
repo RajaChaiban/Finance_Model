@@ -122,7 +122,8 @@
       "Bash(python -m uvicorn src.api.main:app --port 8002 --host 127.0.0.1)",
       "Bash(echo \"uvicorn PID: $!\")",
       "Bash(echo \"vite PID: $!\")",
-      "mcp__tavily__tavily_search"
+      "mcp__tavily__tavily_search",
+      "mcp__chrome-devtools__take_screenshot"
     ]
   }
 }

@@ -18,18 +18,15 @@ The third element of the ``price_asian`` return tuple (paths) is always
 """
 
 import QuantLib as ql
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from . import black_scholes
+from ._ql_session import ql_locked, days_from_T as _days_from_T
 
 
 _CALENDAR = ql.UnitedStates(ql.UnitedStates.NYSE)
 _DAY_COUNT = ql.Actual365Fixed()
 _DEFAULT_SEED = 42
-
-
-def _days_from_T(T: float) -> int:
-    return max(int(T * 365.0 + 0.5), 1)
 
 
 def _build_process(S: float, r: float, sigma: float, q: float,
@@ -84,11 +81,15 @@ def _resolve_payoff(option_type: str, K: float) -> ql.PlainVanillaPayoff:
     raise ValueError(f"option_type must be 'call' or 'put', got {option_type!r}")
 
 
+@ql_locked
 def price_asian(S: float, K: float, r: float, sigma: float, T: float,
                 q: float = 0.0, option_type: str = "call",
                 averaging_method: str = "geometric",
                 averaging_frequency: str = "daily",
-                n_paths: int = 50000) -> Tuple[float, float, None]:
+                n_paths: int = 50000,
+                evaluation_date: "Optional[ql.Date]" = None,
+                maturity_date: "Optional[ql.Date]" = None,
+                ) -> Tuple[float, float, None]:
     """Price a fixed-strike, average-price Asian option.
 
     Args:
@@ -97,6 +98,13 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
         averaging_method: 'geometric' (closed form) or 'arithmetic' (MC + geo CV)
         averaging_frequency: 'daily' | 'weekly' | 'monthly'
         n_paths: MC sample count (arithmetic only)
+        evaluation_date: Override today's date (for theta/aged-trade revaluation).
+        maturity_date: Pin the maturity to a specific date instead of inferring
+            ``today + days_from_T(T)``. Used by ``greeks_asian`` so theta-by-
+            date-advance keeps the contract definition (maturity + fixing
+            schedule structure) constant — bumping T directly would also drop
+            a fixing from the schedule, which conflates time decay with a
+            contract change.
 
     Returns:
         (price, std_error, None). std_error == 0.0 for the geometric closed form.
@@ -107,9 +115,9 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
             f"averaging_method must be 'geometric' or 'arithmetic', got {averaging_method!r}"
         )
 
-    today = ql.Date.todaysDate()
+    today = evaluation_date if evaluation_date is not None else ql.Date.todaysDate()
     ql.Settings.instance().evaluationDate = today
-    maturity = today + _days_from_T(T)
+    maturity = maturity_date if maturity_date is not None else today + _days_from_T(T)
 
     payoff = _resolve_payoff(option_type, K)
     exercise = ql.EuropeanExercise(maturity)
@@ -157,6 +165,7 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
     return price, std_error, None
 
 
+@ql_locked
 def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
                  q: float = 0.0, option_type: str = "call",
                  averaging_method: str = "geometric",
@@ -166,14 +175,30 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
 
     Geometric uses the closed-form engine each reprice (cheap → tight tol).
     Arithmetic uses MC with seed=42 each reprice (CRN → low Greek noise).
+
+    Theta is computed by advancing the evaluation date by 1 calendar day with
+    the maturity DATE held constant. Bumping ``T`` directly used to also
+    shrink the fixing-schedule length by one fixing — that is a contract
+    change, not time decay, and produced the wrong-sign theta a flow desk
+    would chase as a ghost greek.
+
+    Vega and rho use central differences (was forward); cost of one extra
+    reprice each is negligible against the O(h²) accuracy gain.
     """
-    def px(S_, r_, sigma_, T_, q_) -> float:
+    # Pin the contract definition: pick today + maturity date once, reuse
+    # them for every bump so spot/vol/rate Greeks see the SAME contract.
+    today = ql.Date.todaysDate()
+    maturity = today + _days_from_T(T)
+
+    def px(S_, r_, sigma_, T_unused_, q_) -> float:
         p, _, _ = price_asian(
-            S_, K, r_, sigma_, T_, q_,
+            S_, K, r_, sigma_, T, q_,  # T forwarded but maturity_date overrides
             option_type=option_type,
             averaging_method=averaging_method,
             averaging_frequency=averaging_frequency,
             n_paths=n_paths,
+            evaluation_date=today,
+            maturity_date=maturity,
         )
         return p
 
@@ -185,17 +210,31 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
     delta = (p_up - p_dn) / (2 * h)
     gamma = (p_up - 2 * price_base + p_dn) / (h * h)
 
+    # Central difference for vega — O(h²) vs forward's O(h).
     vol_bump = 0.01
     p_vu = px(S, r, sigma + vol_bump, T, q)
-    vega = (p_vu - price_base) / vol_bump / 100.0
+    p_vd = px(S, r, sigma - vol_bump, T, q)
+    vega = (p_vu - p_vd) / (2 * vol_bump) / 100.0
 
-    T_down = max(T - 1.0 / 365.0, 0.001)
-    p_t_down = px(S, r, sigma, T_down, q)
-    theta = p_t_down - price_base
+    # Theta: advance eval date by 1 day, keep maturity. p_tomorrow uses the
+    # SAME contract (same maturity date, same fixing schedule) seen from one
+    # day later — pure time-passage effect.
+    p_tomorrow, _, _ = price_asian(
+        S, K, r, sigma, T, q,
+        option_type=option_type,
+        averaging_method=averaging_method,
+        averaging_frequency=averaging_frequency,
+        n_paths=n_paths,
+        evaluation_date=today + 1,
+        maturity_date=maturity,
+    )
+    theta = p_tomorrow - price_base
 
+    # Central difference for rho.
     rate_bump = 0.01
     p_ru = px(S, r + rate_bump, sigma, T, q)
-    rho = (p_ru - price_base) / rate_bump / 100.0
+    p_rd = px(S, r - rate_bump, sigma, T, q)
+    rho = (p_ru - p_rd) / (2 * rate_bump) / 100.0
 
     european_price = black_scholes.price_european(S, K, r, sigma, T, q, option_type)
     asian_premium = price_base - european_price

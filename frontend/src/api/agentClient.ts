@@ -7,6 +7,7 @@
  */
 
 import { getApiBaseUrl } from "./baseUrl";
+import { errorFromResponse } from "./errors";
 
 const API_BASE_URL = getApiBaseUrl();
 
@@ -174,8 +175,7 @@ export class AgentClient {
       body: JSON.stringify(body),
     });
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `Start failed (${r.status})`);
+      throw await errorFromResponse(r, "Start failed");
     }
     return r.json();
   }
@@ -183,8 +183,7 @@ export class AgentClient {
   async getSession(id: string): Promise<SessionView> {
     const r = await fetch(`${API_BASE_URL}/api/agent/sessions/${id}`);
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `Get failed (${r.status})`);
+      throw await errorFromResponse(r, "Get failed");
     }
     return r.json();
   }
@@ -200,10 +199,60 @@ export class AgentClient {
       body: JSON.stringify(body),
     });
     if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `Gate ${gate} failed (${r.status})`);
+      throw await errorFromResponse(r, `Gate ${gate} failed`);
     }
     return r.json();
+  }
+
+  /**
+   * Subscribe to the server-sent events stream for a session.
+   *
+   * Event types the backend emits (see ``src/api/agent_router.py``):
+   *   - ``session_created`` — session is in the store, no agent has run yet
+   *   - ``agent_started`` / ``agent_finished`` — pipeline transitions
+   *   - ``market_context`` — RAG citation appended (one per MI call)
+   *   - ``gate_pending`` — pipeline halted at a HITL gate
+   *   - ``error`` / ``cancelled`` / ``done`` — terminal
+   *   - ``heartbeat`` — keep-alive every ~5s
+   *   - ``stream_close`` — server closed the stream (terminal OR awaiting gate);
+   *      client should call ``stopEvents`` and either resubscribe after a
+   *      gate decision or treat the session as final.
+   *
+   * Returns the underlying EventSource so the caller controls lifecycle
+   * (close on component unmount, on terminal status, after a gate decision).
+   */
+  subscribeToEvents(
+    id: string,
+    onEvent: (event: { type: string; data: unknown }) => void,
+  ): EventSource {
+    const url = `${API_BASE_URL}/api/agent/sessions/${id}/events`;
+    const es = new EventSource(url);
+    const eventTypes = [
+      "session_created",
+      "agent_started",
+      "agent_finished",
+      "gate_pending",
+      "gate_decision",
+      "market_context",
+      "error",
+      "cancelled",
+      "done",
+      "stream_close",
+      "heartbeat",
+      "message",
+    ];
+    eventTypes.forEach((t) => {
+      es.addEventListener(t, (e: MessageEvent) => {
+        let data: unknown = null;
+        try {
+          data = e.data ? JSON.parse(e.data) : null;
+        } catch {
+          data = e.data;
+        }
+        onEvent({ type: t, data });
+      });
+    });
+    return es;
   }
 }
 

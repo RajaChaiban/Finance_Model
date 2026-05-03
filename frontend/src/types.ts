@@ -68,7 +68,12 @@ export interface PricingResult {
   optionType: string;
   pricingTimestamp: string;
 
-  // Surface diagnostics — populated only when use_vol_surface succeeded
+  // Surface diagnostics — populated for every response. ``surfaceStatus``
+  // distinguishes the five build outcomes; the UI uses it to color the
+  // banner (green = ok, amber = suspect, red = failed/empty_chain) so the
+  // trader cannot mistake a silent fall-back for an active surface.
+  surfaceStatus?: "skipped" | "ok" | "suspect" | "failed" | "empty_chain";
+  surfaceFailureReason?: string;
   sigmaUsed?: number;
   sigmaAtm?: number;
   sigmaBarrier?: number;

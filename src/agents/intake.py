@@ -15,6 +15,8 @@ import json
 import logging
 from typing import Any, Optional
 
+from pydantic import ValidationError
+
 from src.config.agent_config import get_agent_config
 
 from .base import AgentError, BaseAgent
@@ -22,6 +24,30 @@ from .llm_client import get_llm_client
 from .state import ClientObjective, StructuringSession
 
 logger = logging.getLogger(__name__)
+
+
+def _summarize_validation_error(exc: Exception, kind: str) -> str:
+    """Turn a pydantic ValidationError into a single human-readable line.
+
+    The default ``str(ValidationError)`` is multi-line, includes a pydantic.dev
+    URL per error, and embeds raw input values — fine for a server log,
+    hostile in a UI banner. The structurer needs to know "what's missing"
+    in plain English so they can re-prompt.
+
+    Returns a single-line summary listing the first three offending fields
+    by location + message, with a "(+N more)" suffix if truncated.
+    """
+    if isinstance(exc, ValidationError):
+        errs = exc.errors()
+        bits = []
+        for e in errs[:3]:
+            loc = ".".join(str(p) for p in e.get("loc", ())) or "(root)"
+            msg = e.get("msg", "invalid value")
+            bits.append(f"{loc}: {msg}")
+        joined = "; ".join(bits)
+        more = f" (+{len(errs) - 3} more)" if len(errs) > 3 else ""
+        return f"Could not parse {kind} — please check: {joined}{more}"
+    return f"Could not parse {kind}: {exc}"
 
 
 _INTAKE_SYSTEM = """You are an Intake Agent at an institutional derivatives structuring desk.
@@ -111,8 +137,13 @@ class IntakeAgent(BaseAgent):
             data["raw_rfq"] = raw_rfq
         try:
             return ClientObjective(**data)
-        except Exception as exc:  # noqa: BLE001 — pydantic raises a custom type
-            raise AgentError(f"Form intake failed validation: {exc}") from exc
+        except ValidationError as exc:
+            # Sanitize: the raw pydantic dump is a 1-2 KB blob that the FE
+            # banner displays verbatim. Summarize to a single line listing
+            # the first 3 missing/bad fields.
+            raise AgentError(_summarize_validation_error(exc, "form intake")) from exc
+        except Exception as exc:  # noqa: BLE001 — non-validation surprises
+            raise AgentError(f"Form intake failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Natural-language path (LLM)
@@ -147,7 +178,13 @@ class IntakeAgent(BaseAgent):
 
         try:
             obj = ClientObjective(**parsed)
-        except Exception as exc:
-            raise AgentError(f"Intake JSON failed validation: {exc}") from exc
+        except ValidationError as exc:
+            # Same sanitization as the form path — the LLM occasionally
+            # returns JSON that pydantic rejects (wrong types on an enum
+            # field, missing required key). Show the structurer the first
+            # 3 issues, not the full pydantic.dev URL dump.
+            raise AgentError(_summarize_validation_error(exc, "natural-language RFQ")) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise AgentError(f"Natural-language RFQ failed: {exc}") from exc
 
         return obj

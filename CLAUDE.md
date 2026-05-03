@@ -166,7 +166,7 @@ not been verified through this loop.
 
 | Surface touched | Required gate | Command |
 |---|---|---|
-| Any Python in `src/` | Full backend tests | `python -m pytest tests/ --ignore=tests/test_gs_quant_engine.py` |
+| Any Python in `src/` | Full backend tests | `python -m pytest tests/` |
 | Pricing engine / router | Backend tests **and** a sample `POST /api/price` against a running uvicorn | see "How to run things" |
 | Agent / orchestrator | Backend tests **and** a sample `POST /api/agent/sessions` round-trip | — |
 | RAG / `market_intelligence.py` | `pytest tests/test_market_intelligence_integration.py tests/test_fred_ingester.py` **and** a live retrieval probe via `get_market_intelligence()` | — |

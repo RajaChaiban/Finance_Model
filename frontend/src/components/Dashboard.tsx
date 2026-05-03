@@ -71,6 +71,8 @@ export function Dashboard() {
         underlying: response.underlying,
         optionType: response.option_type,
         pricingTimestamp: response.pricing_timestamp,
+        surfaceStatus: response.surface_status,
+        surfaceFailureReason: response.surface_failure_reason,
         sigmaUsed: response.sigma_used,
         sigmaAtm: response.sigma_atm,
         sigmaBarrier: response.sigma_barrier,

@@ -94,12 +94,29 @@ def route(option_type: str) -> Tuple[Callable, Callable, str]:
     return routing_table[option_type]
 
 
+# Surface-handle kwargs that EVERY QL engine in this codebase accepts. Other
+# kwargs (n_steps, monitoring, barrier_kind, averaging_*, lookback_type,
+# variance_reduction, ...) are engine-specific and are forwarded by the
+# per-product wrapper closures below using their named parameters — NOT
+# through this filter — to avoid passing a flag to an engine that doesn't
+# take it (e.g. n_steps to price_knockout_ql).
+#
+# When adding a NEW kwarg that ALL QL engines should see (rare — vol_handle
+# and use_local_vol_pde are the only ones today), add it here.
+_QL_SURFACE_KWARGS = ("vol_handle", "use_local_vol_pde")
+
+
 def _ql_kwargs(kwargs):
-    """Subset of kwargs the QL engines understand (forward; drop the rest)."""
+    """Forward only surface-related kwargs that every QL engine accepts.
+
+    Engine-specific kwargs (monitoring, barrier_kind, n_steps, etc.) are
+    passed explicitly by the per-product wrappers below — keeping this
+    filter narrow prevents accidental cross-engine kwarg leakage.
+    """
     out = {}
-    if "vol_handle" in kwargs and kwargs["vol_handle"] is not None:
+    if kwargs.get("vol_handle") is not None:
         out["vol_handle"] = kwargs["vol_handle"]
-    if "use_local_vol_pde" in kwargs and kwargs["use_local_vol_pde"]:
+    if kwargs.get("use_local_vol_pde"):
         out["use_local_vol_pde"] = True
     return out
 
@@ -140,13 +157,18 @@ def _make_american_pricer(opt: str) -> Callable:
 
 
 def _make_american_greeks(opt: str) -> Callable:
-    def greeks(S, K, r, sigma, T, q, **kwargs):
+    def greeks(S, K, r, sigma, T, q, n_steps=201, n_paths=5000,
+               variance_reduction="antithetic", **kwargs):
         if QUANTLIB_AVAILABLE:
             return quantlib_engine.greeks_ql(
                 S, K, r, sigma, T, q, option_type=opt, is_american=True,
+                n_steps=n_steps,
                 **_ql_kwargs(kwargs),
             )
-        return monte_carlo_lsm.greeks_american(S, K, r, sigma, T, q, option_type=opt)
+        return monte_carlo_lsm.greeks_american(
+            S, K, r, sigma, T, q, n_paths=n_paths, n_steps=n_steps,
+            variance_reduction=variance_reduction, option_type=opt,
+        )
     return greeks
 
 
@@ -269,17 +291,19 @@ def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable,
 
     engine='auto' (default) reproduces the existing route() behaviour.
     For american_*, engine='mc' forces monte_carlo_lsm regardless of QL.
-    engine='analytic'|'tree'|'fdm' collapse to the QL default for now
-    (reserved for future explicit per-engine routing in later phases).
-    engine='gs' routes European call/put through the gs_quant adapter
-    (requires Marquee credentials — see src/engines/gs_quant_engine.py).
+
+    engine='analytic'|'tree'|'fdm' are CURRENTLY ALIASES for 'auto' — the
+    plumbing to dispatch on these labels has not been wired yet, but the
+    schema accepts them so client code can opt into a specific method
+    without breaking when the wiring lands. Today they all collapse to
+    the QL default. A deprecation warning would be worse UX than silent
+    aliasing because the labels are not actually wrong, just imprecise.
 
     Returns:
         (pricer_func, greeks_func, description)
 
     Raises:
-        ValueError: If engine is not a recognised selector OR if 'gs' is
-            requested for a product the gs adapter doesn't yet support.
+        ValueError: If engine is not a recognised selector.
     """
     if engine == "auto":
         return route(option_type)
@@ -294,39 +318,23 @@ def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable,
                 option_type=opt,
             )
 
-        def greeks(S, K, r, sigma, T, q, **kwargs):
+        def greeks(S, K, r, sigma, T, q, n_paths=10000, n_steps=90,
+                   variance_reduction="none", **kwargs):
+            # Forward the same MC settings the price call used so greeks["price"]
+            # matches the price endpoint to MC noise.
             return monte_carlo_lsm.greeks_american(
-                S, K, r, sigma, T, q, option_type=opt,
+                S, K, r, sigma, T, q,
+                n_paths=n_paths, n_steps=n_steps,
+                variance_reduction=variance_reduction,
+                option_type=opt,
             )
 
         return pricer, greeks, "Monte Carlo LSM (American, forced)"
-
-    if engine == "gs":
-        if option_type not in ("european_call", "european_put"):
-            raise ValueError(
-                f"engine='gs' currently supports european_call / european_put only; "
-                f"got option_type={option_type!r}. Other products fall back to QuantLib."
-            )
-        from . import gs_quant_engine
-
-        opt = option_type.split("_")[1]
-
-        def pricer(S, K, r, sigma, T, q, **kwargs):
-            return gs_quant_engine.price_european_gs(
-                S, K, r, sigma, T, q, option_type=opt, **kwargs,
-            )
-
-        def greeks(S, K, r, sigma, T, q, **kwargs):
-            return gs_quant_engine.greeks_european_gs(
-                S, K, r, sigma, T, q, option_type=opt, **kwargs,
-            )
-
-        return pricer, greeks, "gs_quant Marquee (European, server-side)"
 
     if engine in ("analytic", "tree", "fdm"):
         # Phase 1: these all collapse to the QL default for now.
         return route(option_type)
 
     raise ValueError(
-        f"Unknown engine: {engine!r}. Valid values: auto|analytic|tree|mc|fdm|gs"
+        f"Unknown engine: {engine!r}. Valid values: auto|analytic|tree|mc|fdm"
     )

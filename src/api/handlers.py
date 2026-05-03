@@ -1,7 +1,7 @@
 """Handler functions that wrap the existing Python pricing pipeline."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Tuple, Dict, Any, Optional
 
 from src.config.loader import PricingConfig
@@ -49,11 +49,14 @@ def price_option(request: PricingRequest) -> PricingResult:
 
         # Live IV surface (opt-in). On any failure, fall back to the scalar
         # σ from the request — the user still gets a price, just without the
-        # smile-aware path.
+        # smile-aware path. ``surface_status`` is set on every branch so the
+        # client can tell skipped-by-design from failed-silently.
         sigma_atm: Optional[float] = None
         sigma_barrier: Optional[float] = None
         surface_quotes_inverted: Optional[int] = None
         surface_quotes_total: Optional[int] = None
+        surface_status: str = "skipped"
+        surface_failure_reason: Optional[str] = None
         if request.use_vol_surface:
             try:
                 import QuantLib as ql
@@ -104,18 +107,66 @@ def price_option(request: PricingRequest) -> PricingResult:
                         pricing_params["use_local_vol_pde"] = True
                     surface_quotes_inverted = grid.n_quotes_inverted
                     surface_quotes_total = grid.n_quotes_total
+                    # Sanity gate on the surface σ at the strike. A genuine
+                    # equity vol > 200% is exceptional: post-event single-name
+                    # (earnings, M&A), illiquid weeklies with stale quotes, or
+                    # a ticker symbol collision. The build itself didn't
+                    # error, so we still fed it to the engine — but the UI
+                    # needs to warn the user rather than display
+                    # surface_status="ok" with a 300% σ.
+                    # Tightened from 2.0 to 1.5 after senior review found that
+                    # SPY 30D ATM came back with sigma_atm=164% on a single
+                    # poll labelled "ok" under the 2.0 bound — a 200% bound
+                    # was wide enough to let a clearly-broken surface
+                    # through. 1.5 still covers post-event single-name
+                    # stress (AMC/GME-style) without false positives in
+                    # normal regimes.
+                    SIGMA_SANITY_BOUND = 1.5
+                    # Check σ at strike AND at barrier — for KO/KI products
+                    # the barrier σ is the dominant risk number (it drives
+                    # the knock-probability term), and a busted barrier σ on
+                    # an otherwise-clean strike σ is exactly the kind of
+                    # asymmetry the smile-aware FD-LV path was added to
+                    # exploit. Either being out-of-bounds flips the status.
+                    suspect_reasons = []
+                    if sigma_atm > SIGMA_SANITY_BOUND:
+                        suspect_reasons.append(
+                            f"sigma_atm={sigma_atm:.2%}"
+                        )
+                    if sigma_barrier is not None and sigma_barrier > SIGMA_SANITY_BOUND:
+                        suspect_reasons.append(
+                            f"sigma_barrier={sigma_barrier:.2%}"
+                        )
+                    if suspect_reasons:
+                        surface_status = "suspect"
+                        surface_failure_reason = (
+                            f"{' and '.join(suspect_reasons)} exceeds sanity "
+                            f"bound {SIGMA_SANITY_BOUND:.0%}; surface likely "
+                            f"built from stale or pathological quotes"
+                        )
+                        logger.warning(
+                            "Surface for %s flagged SUSPECT: %s > %.2f",
+                            config.underlying, ", ".join(suspect_reasons),
+                            SIGMA_SANITY_BOUND,
+                        )
+                    else:
+                        surface_status = "ok"
                     logger.info(
                         f"Surface built: {grid.n_quotes_inverted}/{grid.n_quotes_total} "
                         f"quotes; σ@K={sigma_atm:.4f}"
                         f"{f' σ@B={sigma_barrier:.4f}' if sigma_barrier else ''}"
                         f"{' (FD local vol)' if pricing_params.get('use_local_vol_pde') else ''}"
+                        f" [{surface_status}]"
                     )
                 else:
+                    surface_status = "empty_chain"
                     logger.warning(
                         f"Empty option chain for {config.underlying}; "
                         f"falling back to scalar σ from request."
                     )
             except Exception as exc:
+                surface_status = "failed"
+                surface_failure_reason = f"{type(exc).__name__}: {exc}"
                 logger.warning(
                     f"Surface build failed ({exc}); falling back to scalar σ."
                 )
@@ -135,10 +186,13 @@ def price_option(request: PricingRequest) -> PricingResult:
 
         # Calculate Greeks. vol_handle / use_local_vol_pde must pass through so
         # Greeks are surface-aware too (every bump-reprice keeps the same engine).
+        # variance_reduction is also forwarded so the bump-base price returned
+        # in greeks["price"] uses the same MC settings as the headline price.
         greeks_params = {
             k: v
             for k, v in pricing_params.items()
             if k in ["S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
+                     "variance_reduction",
                      "barrier_level", "vol_handle", "use_local_vol_pde",
                      "averaging_method", "averaging_frequency", "lookback_type"]
         }
@@ -179,7 +233,9 @@ def price_option(request: PricingRequest) -> PricingResult:
             report_html=report_html,
             underlying=config.underlying,
             option_type=config.option_type,
-            pricing_timestamp=datetime.now().isoformat(),
+            pricing_timestamp=datetime.now(timezone.utc).isoformat(),
+            surface_status=surface_status,
+            surface_failure_reason=surface_failure_reason,
             sigma_used=float(pricing_params["sigma"]),
             sigma_atm=sigma_atm,
             sigma_barrier=sigma_barrier,
@@ -217,9 +273,15 @@ def price_option(request: PricingRequest) -> PricingResult:
 
         return result
 
+    except ValueError:
+        # Validation errors keep their original message and class — they map
+        # to 422 in FastAPI without our wrapper hiding the cause.
+        raise
     except Exception as e:
         logger.error(f"Pricing failed: {e}", exc_info=True)
-        raise ValueError(f"Pricing failed: {str(e)}")
+        # Preserve the cause chain (PEP 3134) so traceback shows the original
+        # exception class — wrapping in plain ValueError used to lose that.
+        raise ValueError(f"Pricing failed: {str(e)}") from e
 
 
 def _request_to_config(request: PricingRequest) -> PricingConfig:

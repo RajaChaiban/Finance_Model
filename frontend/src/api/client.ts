@@ -3,6 +3,7 @@
  */
 
 import { getApiBaseUrl } from "./baseUrl";
+import { errorFromResponse } from "./errors";
 
 // Dynamically set API URL - defaults to localhost:8002, but can be overridden with VITE_API_URL env var
 const API_BASE_URL = getApiBaseUrl();
@@ -68,7 +69,10 @@ export interface PricingResult {
   option_type: string;
   pricing_timestamp: string;
 
-  // Surface diagnostics
+  // Surface diagnostics — surface_status is ALWAYS set so the UI can show
+  // the trader whether the surface was ok, suspect, failed, or skipped.
+  surface_status?: "skipped" | "ok" | "suspect" | "failed" | "empty_chain";
+  surface_failure_reason?: string;
   sigma_used?: number;
   sigma_atm?: number;
   sigma_barrier?: number;
@@ -91,8 +95,7 @@ export class APIClient {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Pricing failed");
+      throw await errorFromResponse(response, "Pricing failed");
     }
 
     return response.json();
@@ -111,12 +114,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/spot-price?ticker=${ticker}`
     );
-
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Failed to fetch spot price");
+      throw await errorFromResponse(response, "Failed to fetch spot price");
     }
-
     const data = await response.json();
     return data.spot_price;
   }
@@ -125,12 +125,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/dividend-yield?ticker=${ticker}`
     );
-
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Failed to fetch dividend yield");
+      throw await errorFromResponse(response, "Failed to fetch dividend yield");
     }
-
     const data = await response.json();
     return data.dividend_yield;
   }
@@ -139,12 +136,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/risk-free-rate?days_to_expiration=${daysToExpiration}`
     );
-
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Failed to fetch risk-free rate");
+      throw await errorFromResponse(response, "Failed to fetch risk-free rate");
     }
-
     const data = await response.json();
     return data.risk_free_rate;
   }
@@ -156,12 +150,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/historical-volatility?ticker=${ticker}&lookback_days=${lookbackDays}`
     );
-
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Failed to fetch historical volatility");
+      throw await errorFromResponse(response, "Failed to fetch historical volatility");
     }
-
     const data = await response.json();
     return data.volatility;
   }
@@ -170,12 +161,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/movers?universe=${universe}`
     );
-
     if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || "Failed to fetch movers");
+      throw await errorFromResponse(response, "Failed to fetch movers");
     }
-
     return response.json();
   }
 
@@ -185,12 +173,9 @@ export class APIClient {
     const response = await fetch(
       `${API_BASE_URL}/api/market/dividend-info?ticker=${ticker}`
     );
-
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.detail || "Failed to fetch dividend info");
+      throw await errorFromResponse(response, "Failed to fetch dividend info");
     }
-
     const data = await response.json();
     return {
       next_dividend_date: data.next_dividend_date,
