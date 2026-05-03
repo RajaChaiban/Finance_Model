@@ -68,6 +68,7 @@ class NarratorAgent(BaseAgent):
         verdict_line = self._verdict_line(chosen, scenarios_by_id, session.objective)
         deterministic_table = memo.comparison_table_md
         deterministic_caveats = list(memo.caveats)
+        deterministic_recommendation = memo.recommendation_md
 
         self._polish_with_llm(memo, session)
 
@@ -79,6 +80,9 @@ class NarratorAgent(BaseAgent):
             memo.objective_restatement, verdict_line, on_title=False
         )
         memo.caveats = self._merge_caveats(memo.caveats, deterministic_caveats)
+        memo.recommendation_md = self._ensure_mi_footer(
+            memo.recommendation_md, deterministic_recommendation
+        )
 
         # Stitch citations from upstream MI calls into the memo (no extra LLM).
         self._append_market_context_citations(memo, session)
@@ -98,6 +102,40 @@ class NarratorAgent(BaseAgent):
         if on_title:
             return f"VERDICT: {verdict}\n{text}".strip()
         return f"**RECOMMENDATION:** {verdict}\n\n{text}".strip()
+
+    @staticmethod
+    def _ensure_mi_footer(polished: str, deterministic: str) -> str:
+        """Re-apply the MI citation / absence clause after LLM polish.
+
+        The deterministic recommendation always ends with either
+        ``Market context (via X, Y) supports this view [source: Z].`` or
+        ``Note: no MI context available for this session.`` — both load-bearing
+        signals for downstream auditing. The LLM polish step may rewrite prose
+        and drop them; this guard restores whichever clause was present.
+        """
+        polished = polished or ""
+        polished_lower = polished.lower()
+        if (
+            "[source:" in polished
+            or "market context (via" in polished_lower
+            or "no mi context" in polished_lower
+        ):
+            return polished
+        det = deterministic or ""
+        clause = ""
+        if "Market context" in det:
+            idx = det.rfind("Market context")
+            if idx >= 0:
+                end = det.find("\n", idx)
+                clause = det[idx:end if end > 0 else None].strip()
+        elif "no MI context" in det.lower():
+            idx = det.lower().rfind("note: no mi context")
+            if idx >= 0:
+                end = det.find("\n", idx)
+                clause = det[idx:end if end > 0 else None].strip()
+        if not clause:
+            clause = "Note: no MI context available for this session."
+        return f"{polished.rstrip()}\n\n{clause}\n"
 
     @staticmethod
     def _merge_caveats(llm_caveats: list[str], deterministic: list[str]) -> list[str]:
