@@ -747,14 +747,31 @@ class MarketIntelligence:
 # =====================================================================
 
 def _build_sources(results: Sequence[SearchResult]) -> List[Dict[str, Any]]:
-    return [
-        {
+    """Pass through enough doc metadata to render comparable-deals citations.
+
+    The Narrator consumes this list (via ``session.market_context``) to render
+    the "Recent Comparable Deals" section. Including ``as_of``, ``asset_class``,
+    and a content snippet here means the Narrator never has to re-query the
+    corpus — citations are self-contained and the memo proves corpus freshness
+    without an extra round-trip.
+    """
+    out: List[Dict[str, Any]] = []
+    for r in results:
+        meta = r.metadata or {}
+        src: Dict[str, Any] = {
             "id": r.doc_id,
-            "type": (r.metadata or {}).get("doc_type"),
+            "type": meta.get("doc_type"),
             "score": round(r.score, 3),
         }
-        for r in results
-    ]
+        if meta.get("as_of"):
+            src["as_of"] = meta["as_of"]
+        if meta.get("asset_class"):
+            src["asset_class"] = meta["asset_class"]
+        if r.content:
+            snippet = r.content.strip().replace("\n", " ")
+            src["snippet"] = snippet[:220] + ("…" if len(snippet) > 220 else "")
+        out.append(src)
+    return out
 
 
 # =====================================================================

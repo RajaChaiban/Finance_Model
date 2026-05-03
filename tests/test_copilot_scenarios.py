@@ -169,6 +169,20 @@ def _assert_memo_format(memo: MemoArtifact, priced: list[PricedCandidate]) -> No
     for c in memo.caveats:
         assert c.strip(), "caveat is empty/whitespace"
 
+    # 5b. "Recent Comparable Deals" section is present (either with a table
+    # of deals or an explicit "no deals indexed" note). This proves the RAG
+    # citation pipeline is wired into the memo even when the corpus is sparse.
+    rec_for_deals = memo.recommendation_md
+    assert "### Recent Comparable Deals" in rec_for_deals, (
+        "memo.recommendation_md missing 'Recent Comparable Deals' section"
+    )
+    has_deals_table = "| Source ID |" in rec_for_deals and "| Asset |" in rec_for_deals
+    has_empty_note = "No comparable deals indexed" in rec_for_deals
+    assert has_deals_table or has_empty_note, (
+        "Recent Comparable Deals section must contain either a table or the "
+        "explicit no-deals note"
+    )
+
     # 5. Recommendation either references MI or explicitly states absence.
     # Valid MI signal forms: "[source: <id>]" with a source ID, OR
     # "Market context (via <agent>, <intent>) supports this view" when entries

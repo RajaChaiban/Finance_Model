@@ -12,6 +12,7 @@ Phase 4 layers an HTML/Jinja template on top for the polished memo.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime
 from typing import Any, Optional
 
 from src.config.agent_config import get_agent_config
@@ -86,6 +87,10 @@ class NarratorAgent(BaseAgent):
 
         # Stitch citations from upstream MI calls into the memo (no extra LLM).
         self._append_market_context_citations(memo, session)
+        # Render a freshness-aware "Recent Comparable Deals" section so the
+        # structurer can see what other desks are doing and how stale the
+        # corpus is at quote time.
+        self._append_comparable_deals_section(memo, session)
         session.memo = memo
         return session
 
@@ -804,6 +809,147 @@ class NarratorAgent(BaseAgent):
                 )
             html_lines += ["</ol>", "</section>"]
             memo.rendered_html = memo.rendered_html.rstrip() + "\n" + "\n".join(html_lines)
+
+    # ------------------------------------------------------------------
+    # Recent Comparable Deals — freshness + competitive intelligence
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_as_of(value: Any) -> Optional[date]:
+        """Parse an ``as_of`` field (ISO date string) to a ``date`` object."""
+        if not value:
+            return None
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        text = str(value).strip()
+        for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(text[: len(fmt) + 5], fmt).date()
+            except ValueError:
+                continue
+        # ISO with timezone or fractional seconds: try fromisoformat (Py 3.11+).
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+        except (ValueError, TypeError):
+            return None
+
+    def _collect_comparable_deals(
+        self, session: StructuringSession
+    ) -> list[dict[str, Any]]:
+        """Pull unique deal-type sources from session.market_context, sorted
+        freshest-first. Undated docs land at the bottom."""
+        seen: set[str] = set()
+        deals: list[dict[str, Any]] = []
+        for entry in session.market_context or []:
+            for src in entry.get("sources") or []:
+                if not isinstance(src, dict):
+                    continue
+                if src.get("type") != "deal":
+                    continue
+                sid = str(src.get("id") or "")
+                if not sid or sid in seen:
+                    continue
+                seen.add(sid)
+                deals.append(
+                    {
+                        "id": sid,
+                        "asset_class": src.get("asset_class") or "—",
+                        "as_of": src.get("as_of"),
+                        "as_of_date": self._parse_as_of(src.get("as_of")),
+                        "snippet": src.get("snippet") or "",
+                        "score": src.get("score"),
+                    }
+                )
+
+        # Freshest dates first; undated last (sorted by id for stability).
+        def _sort_key(d: dict[str, Any]):
+            ad = d["as_of_date"]
+            return (0, -ad.toordinal()) if ad is not None else (1, d["id"])
+
+        deals.sort(key=_sort_key)
+        return deals
+
+    def _append_comparable_deals_section(
+        self, memo: MemoArtifact, session: StructuringSession
+    ) -> None:
+        """Append a freshness-aware comparable-deals table.
+
+        Renders to ``memo.recommendation_md`` (and to ``rendered_html`` if a
+        polished HTML version is present). The section header tells the
+        structurer how stale the corpus is; the table shows what other desks
+        have been doing on similar tickers/structures.
+        """
+        deals = self._collect_comparable_deals(session)
+        if not deals:
+            note_md = (
+                "\n\n### Recent Comparable Deals\n\n"
+                "_No comparable deals indexed in the MI corpus for this query._\n"
+            )
+            memo.recommendation_md = (memo.recommendation_md or "").rstrip() + note_md
+            return
+
+        today = date.today()
+        dated = [d for d in deals if d["as_of_date"] is not None]
+        latest = max((d["as_of_date"] for d in dated), default=None)
+
+        header_bits: list[str] = [f"{len(deals)} unique deals indexed"]
+        if latest is not None:
+            lag = (today - latest).days
+            header_bits.append(f"freshest {latest.isoformat()} (T-{lag}d)")
+        if len(dated) < len(deals):
+            header_bits.append(f"{len(deals) - len(dated)} undated")
+        header_line = "Corpus freshness — " + "; ".join(header_bits) + "."
+
+        rows = [
+            "| # | Source ID | Asset | As Of | Lag | Snippet |",
+            "|---|---|---|---|---|---|",
+        ]
+        for i, d in enumerate(deals[:10], start=1):
+            ad = d["as_of_date"]
+            as_of_str = ad.isoformat() if ad else "—"
+            lag_str = f"T-{(today - ad).days}d" if ad else "—"
+            snippet = d["snippet"].replace("|", "\\|") if d["snippet"] else "—"
+            if len(snippet) > 140:
+                snippet = snippet[:140] + "…"
+            rows.append(
+                f"| {i} | `{d['id']}` | {d['asset_class']} | {as_of_str} | "
+                f"{lag_str} | {snippet} |"
+            )
+        if len(deals) > 10:
+            rows.append(f"| … | _{len(deals) - 10} more not shown_ | | | | |")
+
+        section_md = (
+            "\n\n### Recent Comparable Deals\n\n"
+            f"_{header_line}_\n\n" + "\n".join(rows) + "\n"
+        )
+        memo.recommendation_md = (memo.recommendation_md or "").rstrip() + section_md
+
+        if memo.rendered_html:
+            html = [
+                "<section class='comparable-deals'>",
+                "<h3>Recent Comparable Deals</h3>",
+                f"<p><em>{header_line}</em></p>",
+                "<table><thead><tr>"
+                "<th>#</th><th>Source ID</th><th>Asset</th>"
+                "<th>As Of</th><th>Lag</th><th>Snippet</th>"
+                "</tr></thead><tbody>",
+            ]
+            for i, d in enumerate(deals[:10], start=1):
+                ad = d["as_of_date"]
+                as_of_str = ad.isoformat() if ad else "&mdash;"
+                lag_str = f"T-{(today - ad).days}d" if ad else "&mdash;"
+                snippet = d["snippet"] or "&mdash;"
+                if len(snippet) > 140:
+                    snippet = snippet[:140] + "…"
+                html.append(
+                    f"<tr><td>{i}</td><td><code>{d['id']}</code></td>"
+                    f"<td>{d['asset_class']}</td><td>{as_of_str}</td>"
+                    f"<td>{lag_str}</td><td>{snippet}</td></tr>"
+                )
+            html += ["</tbody></table>", "</section>"]
+            memo.rendered_html = memo.rendered_html.rstrip() + "\n" + "\n".join(html)
 
     # ------------------------------------------------------------------
     # Optional LLM polish
