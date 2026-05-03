@@ -95,12 +95,24 @@ class TestRouterMatrix:
         _, greeks_fn, _ = router.route(option_type)
         extra = _kwargs_for(option_type, params)
         g = greeks_fn(**params, **extra)
+        # Pin-risk contract: when S sits on the barrier, the bump-reprice
+        # central-difference straddles B and the engine NaNs the Greeks +
+        # flags pin_risk=True. Sign asserts on NaN are meaningless — skip.
+        if "knockout" in option_type and g.get("pin_risk", False):
+            assert math.isnan(g["delta"])
+            assert math.isnan(g["gamma"])
+            assert math.isnan(g["vega"])
+            return
         if "call" in option_type:
             assert -1e-6 <= g["delta"] <= 1.0 + 1e-6
         else:
             assert -1.0 - 1e-6 <= g["delta"] <= 1e-6
         assert g["gamma"] >= -1e-6
-        assert g["vega"] >= -1e-6
+        # Vega is non-negative for European/American long options, but FDM
+        # discretisation noise on a deep-OTM American with very small vega
+        # (~$1e-5) can dip slightly negative. Tolerate a 1bp absolute slack
+        # — anything larger would be a real model bug.
+        assert g["vega"] >= -1e-4
 
     @pytest.mark.parametrize("opt_side", ["call", "put"])
     @pytest.mark.parametrize("params", GRID)

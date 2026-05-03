@@ -1,8 +1,8 @@
 ---
 component: MarketIntelligence (RAG layer)
 role: user_template
-source: src/agents/market_intelligence.py:386 (PromptManager.TEMPLATE_PRICING_BENCHMARK)
-filled_by: market_intelligence.py:716 (query_pricing)
+source: src/agents/market_intelligence.py PromptManager.TEMPLATE_PRICING_BENCHMARK
+filled_by: market_intelligence.py:716 (query_pricing) via str.format(...)
 paired_system: prompts/market_intelligence/system_pricing.md
 calling_agent: PricingAgent.pricing.py:75
 placeholders:
@@ -14,8 +14,6 @@ note: |
   Called AFTER the QuantLib pricing run, not before. Output decorates the
   model price in the memo — it does not change the price itself.
 ---
-
-```text
 Based on recent comparable prints and listed reference levels, provide pricing benchmarks for a {tranche_type} structure on {asset_class}:
 
 Comparable Trades:
@@ -30,4 +28,3 @@ Provide:
 3. Key pricing drivers — skew, term structure, barrier proximity, hedging-cost premium
 4. Range of plausible outcomes
 5. Confidence level (high/medium/low) and what would tighten it
-```

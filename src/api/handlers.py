@@ -1,8 +1,8 @@
 """Handler functions that wrap the existing Python pricing pipeline."""
 
 import logging
-from datetime import datetime, timezone
-from typing import Tuple, Dict, Any, Optional
+from datetime import datetime, date, timezone
+from typing import Tuple, Dict, Any, Optional, List
 
 from src.config.loader import PricingConfig
 from src.engines import router
@@ -30,6 +30,26 @@ def price_option(request: PricingRequest) -> PricingResult:
         # Convert request to internal Config object
         config = _request_to_config(request)
 
+        # Convert ISO-string dividend schedule (wire format) to ql.Date tuples
+        # before handing it to the engine. Dates after expiry are silently
+        # dropped by QL; we don't filter here so the user can see the full
+        # schedule in the report.
+        ql_dividend_schedule = _convert_dividend_schedule(config.dividend_schedule)
+
+        # Discrete dividend schedules are only consumed by the American
+        # engines; the router's ``_ql_kwargs`` filter forwards only surface
+        # kwargs (vol_handle, use_local_vol_pde) and would otherwise drop
+        # ``dividend_schedule`` for European/Asian/Lookback/Barrier products
+        # without a peep. Warn loudly so the user does not believe discrete
+        # divs were applied when they were not.
+        if ql_dividend_schedule and not config.option_type.startswith("american_"):
+            logger.warning(
+                "dividend_schedule supplied for %s but only American options "
+                "consume discrete divs; ignoring. Use dividend_yield for "
+                "continuous q on this product.",
+                config.option_type,
+            )
+
         # Prepare pricing parameters
         pricing_params = {
             "S": config.spot_price,
@@ -42,6 +62,14 @@ def price_option(request: PricingRequest) -> PricingResult:
             "n_steps": config.n_steps,
             "variance_reduction": config.variance_reduction,
             "barrier_level": config.barrier_level,
+            # Barrier monitoring frequency — defaults to "continuous" so the
+            # analytic engine result is unchanged for callers that don't set
+            # it; daily/weekly/monthly trigger the BGK shift in the engine.
+            "monitoring": config.monitoring,
+            # Discrete cash dividends (American only). Empty/None routes to
+            # the continuous-yield path; non-empty routes to FDM with QL
+            # DividendSchedule.
+            "dividend_schedule": ql_dividend_schedule,
             "averaging_method": config.averaging_method,
             "averaging_frequency": config.averaging_frequency,
             "lookback_type": config.lookback_type,
@@ -193,10 +221,16 @@ def price_option(request: PricingRequest) -> PricingResult:
             for k, v in pricing_params.items()
             if k in ["S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
                      "variance_reduction",
-                     "barrier_level", "vol_handle", "use_local_vol_pde",
+                     "barrier_level", "monitoring", "dividend_schedule",
+                     "vol_handle", "use_local_vol_pde",
                      "averaging_method", "averaging_frequency", "lookback_type"]
         }
         greeks = greeks_func(**greeks_params)
+        # Pin-risk flag is meta, not a Greek — pop it out so the dict the
+        # report sees only has numeric values, and lift it onto the response
+        # object below. ``False`` is the default so non-barrier products
+        # don't accidentally inherit a pin_risk=True from a stale state.
+        pin_risk = bool(greeks.pop("pin_risk", False))
 
         # Generate report. When surface is active, sync config.volatility to the
         # σ actually fed to the engine so the report body doesn't contradict
@@ -224,6 +258,16 @@ def price_option(request: PricingRequest) -> PricingResult:
         # Embed structurer analysis in report
         report_html = _inject_structurer_analysis(report_html, opinion)
 
+        # Bridge σ rule: only meaningful when the surface was successfully
+        # consumed AND the product is a barrier (KO/KI). Anything else (flat
+        # σ, surface failed, vanilla product) leaves it None.
+        is_barrier = ("knockout" in config.option_type or "knockin" in config.option_type)
+        bridge_sigma_rule: Optional[str] = (
+            "max(sigma_K, sigma_B)"
+            if (surface_status == "ok" and is_barrier)
+            else None
+        )
+
         # Create response
         result = PricingResult(
             price=price,
@@ -241,6 +285,8 @@ def price_option(request: PricingRequest) -> PricingResult:
             sigma_barrier=sigma_barrier,
             surface_quotes_inverted=surface_quotes_inverted,
             surface_quotes_total=surface_quotes_total,
+            pin_risk=pin_risk,
+            bridge_sigma_rule=bridge_sigma_rule,
         )
 
         # Deep risk: scenario grid + gamma ladder (opt-in, computed after primary price).
@@ -315,11 +361,56 @@ def _request_to_config(request: PricingRequest) -> PricingConfig:
         variance_reduction=request.variance_reduction,
         barrier_level=request.barrier_level,
         barrier_type=barrier_type,
+        monitoring=request.monitoring,
+        dividend_schedule=request.dividend_schedule,
         averaging_method=request.averaging_method,
         averaging_frequency=request.averaging_frequency,
         lookback_type=request.lookback_type,
         save_to="./reports/",
     )
+
+
+def _convert_dividend_schedule(schedule: Optional[List]) -> Optional[List]:
+    """Convert a list of [iso_date_str, amount] pairs to [(ql.Date, amount)]
+    tuples ready for ``price_american_discrete_div_ql``.
+
+    Returns ``None`` when the input is None/empty so downstream router code
+    can use a simple truthiness check to decide between the discrete-div FDM
+    engine and the continuous-yield path.
+
+    Raises:
+        ValueError: malformed entry (bad ISO string, non-numeric amount, etc).
+    """
+    if not schedule:
+        return None
+    try:
+        import QuantLib as ql
+    except ImportError as exc:
+        raise ValueError(
+            "QuantLib not available; dividend_schedule requires QL"
+        ) from exc
+
+    converted = []
+    for i, entry in enumerate(schedule):
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise ValueError(
+                f"dividend_schedule[{i}] must be [iso_date_str, amount], got {entry!r}"
+            )
+        iso, amount = entry
+        try:
+            d = date.fromisoformat(str(iso))
+        except ValueError as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] date {iso!r} is not ISO YYYY-MM-DD: {exc}"
+            ) from exc
+        try:
+            amt = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] amount {amount!r} is not numeric: {exc}"
+            ) from exc
+        converted.append((ql.Date(d.day, d.month, d.year), amt))
+    return converted
 
 
 def _inject_structurer_analysis(report_html: str, opinion: Any) -> str:

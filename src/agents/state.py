@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Literal, Optional
+from typing import Any, List, Literal, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -197,6 +197,10 @@ class Leg(BaseModel):
     # Barrier-only fields.
     barrier_level: Optional[float] = None
     barrier_monitoring: str = "continuous"  # 'continuous' | 'daily' | 'weekly' | 'monthly'
+
+    # American-only field.
+    dividend_schedule: Optional[List[List]] = None
+    """Discrete cash dividends for American legs; list of `[iso_date_str, amount]` pairs. None/empty = use continuous-yield approximation."""
 
     # Optional metadata.
     role: Optional[str] = Field(None, description="e.g. 'long_put_protective', 'short_call_yield'.")

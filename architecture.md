@@ -1,4 +1,4 @@
-# Architecture — Vol Desk Platform
+# Architecture — ArgoPilot Platform
 
 A FastAPI + React derivatives pricing platform with QuantLib as the primary numerical engine. Four layers stack on top of the same engines: a market-intelligence layer (live indices and movers), the Quick Pricer (8 product types via REST), a 7-agent structuring co-pilot with human-in-the-loop gates, and a RAG-based market-intelligence (MI) corpus that grounds the agents' reasoning in dealer commentary, comparable term sheets, and pricing benchmarks.
 
@@ -103,7 +103,7 @@ frontend/src/
 │   ├── client.ts             APIClient (pricing + market endpoints)
 │   └── agentClient.ts        Agent endpoints + SSE subscription
 ├── components/
-│   ├── Header.tsx            Vol Desk wordmark + market-status pill + clock
+│   ├── Header.tsx            ArgoPilot wordmark + market-status pill + clock
 │   ├── IndexTickerStrip.tsx  SPY/QQQ/IWM/DIA/VIX cards with sparklines
 │   ├── MoversGrid.tsx        Gainers/Losers/Volatile, click row to prefill
 │   ├── Dashboard.tsx         Page shell, mode switcher, step indicator
@@ -217,7 +217,7 @@ Theta convention matches QuantLib (`option.theta() / 365`). The MC engine's `gre
 
 **Live status**: in production, MC is reached *only* if `import QuantLib` fails (the same module now requires QL itself, so the fallback is logically dead). The frontend's `n_paths` / `variance_reduction` controls are sent in every request but ignored by the engine that actually runs (binomial tree). To genuinely expose MC, add an `engine` field to `PricingRequest`.
 
-## Vol Desk market intelligence layer
+## ArgoPilot market intelligence layer
 
 `src/data/movers.py` exposes `get_movers_payload(universe="default")` consumed by `GET /api/market/movers`:
 
@@ -396,4 +396,4 @@ Engine priorities: parity / no-arb identities first (cross-checks engines agains
 4. **Greeks for barriers near the barrier** use a barrier-distance-aware bump step (`greeks_knockout_ql:604-609`) to avoid pin-risk noise; this is intentional but means delta/gamma reported very close to the barrier are smoothed.
 5. **MC fallback module requires QuantLib** (post-swap), so the `if not QUANTLIB_AVAILABLE` branch in `router.py` is logically unreachable in MC paths. Cleaning this up is a follow-up.
 6. **Agent SessionStore is in-memory only** — sessions are lost on restart. Phase 6 swaps for SQLite.
-7. **`backend/`** at repo root is an empty placeholder (a Vol Desk-era artifact); the real backend lives under `src/api/`.
+7. **`backend/`** at repo root is an empty placeholder (an early-design artifact); the real backend lives under `src/api/`.

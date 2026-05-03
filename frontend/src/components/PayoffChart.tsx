@@ -46,26 +46,37 @@ function intrinsic(optionType: string, S: number, K: number, barrier?: number): 
 }
 
 export function PayoffChart({ optionType, strike, spot, premium, barrier }: PayoffChartProps) {
+  const safeStrike = Number.isFinite(strike) && strike > 0 ? strike : 0;
+  const safeSpot = Number.isFinite(spot) && spot > 0 ? spot : safeStrike;
+  const safePremium = Number.isFinite(premium) ? premium : 0;
+  const safeBarrier =
+    barrier !== undefined && Number.isFinite(barrier) && barrier > 0
+      ? barrier
+      : undefined;
   const data = useMemo<PayoffPoint[]>(() => {
-    const lo = Math.max(0.01, Math.min(strike, spot) * 0.5);
-    const hi = Math.max(strike, spot) * 1.5;
+    if (safeStrike <= 0 && safeSpot <= 0) return [];
+    const lo = Math.max(0.01, Math.min(safeStrike, safeSpot) * 0.5);
+    const hi = Math.max(safeStrike, safeSpot) * 1.5;
+    if (!Number.isFinite(lo) || !Number.isFinite(hi) || hi <= lo) return [];
     const N = 80;
     const step = (hi - lo) / N;
     const points: PayoffPoint[] = [];
     for (let i = 0; i <= N; i++) {
       const S = lo + i * step;
-      const p = intrinsic(optionType, S, strike, barrier);
-      points.push({ S: +S.toFixed(2), payoff: +p.toFixed(4), pnl: +(p - premium).toFixed(4) });
+      const p = intrinsic(optionType, S, safeStrike, safeBarrier);
+      const pnl = p - safePremium;
+      if (!Number.isFinite(S) || !Number.isFinite(p) || !Number.isFinite(pnl)) continue;
+      points.push({ S: +S.toFixed(2), payoff: +p.toFixed(4), pnl: +pnl.toFixed(4) });
     }
     return points;
-  }, [optionType, strike, spot, premium, barrier]);
+  }, [optionType, safeStrike, safeSpot, safePremium, safeBarrier]);
 
   return (
     <div className="vd-chart-card">
       <div className="vd-chart-head">
         <h4>Payoff &amp; P&amp;L at Expiry</h4>
         <span className="vd-chart-sub">
-          Premium ${premium.toFixed(2)} • Strike ${strike.toFixed(2)} • Spot ${spot.toFixed(2)}
+          Premium ${safePremium.toFixed(2)} • Strike ${safeStrike.toFixed(2)} • Spot ${safeSpot.toFixed(2)}
         </span>
       </div>
       <div className="vd-chart-body">
@@ -104,8 +115,8 @@ export function PayoffChart({ optionType, strike, spot, premium, barrier }: Payo
               labelFormatter={(v) => `S_T = $${Number(v).toFixed(2)}`}
             />
             <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="2 2" />
-            <ReferenceLine x={spot} stroke="var(--accent)" strokeDasharray="3 3" label={{ value: "spot", position: "top", fill: "var(--accent-hover)", fontSize: 10 }} />
-            <ReferenceLine x={strike} stroke="var(--text-secondary)" strokeDasharray="3 3" label={{ value: "K", position: "top", fill: "var(--text-secondary)", fontSize: 10 }} />
+            <ReferenceLine x={safeSpot} stroke="var(--accent)" strokeDasharray="3 3" label={{ value: "spot", position: "top", fill: "var(--accent-hover)", fontSize: 10 }} />
+            <ReferenceLine x={safeStrike} stroke="var(--text-secondary)" strokeDasharray="3 3" label={{ value: "K", position: "top", fill: "var(--text-secondary)", fontSize: 10 }} />
             <Area
               type="monotone"
               dataKey="pnl"

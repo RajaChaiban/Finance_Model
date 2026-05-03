@@ -38,26 +38,36 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
     const timer = setTimeout(async () => {
       setFetchingMarketData(true);
       try {
-        const [spotPrice, dividendYield, volatility] = await Promise.all([
+        // allSettled (not all): if one endpoint flakes, the others still
+        // populate. Promise.all would discard a good dividendYield because
+        // historical-vol returned 500.
+        const [spotRes, divRes, volRes] = await Promise.allSettled([
           apiClient.getSpotPrice(formData.underlying),
           apiClient.getDividendYield(formData.underlying),
           apiClient.getHistoricalVolatility(formData.underlying, 252),
         ]);
         if (cancelled) return;
 
-        setFormData((prev) => ({
-          ...prev,
-          spotPrice,
-          dividendYield,
-          volatility,
-          strikePrice:
-            prev.strikePrice <= 0 ||
-            Math.abs(prev.strikePrice - spotPrice) / Math.max(spotPrice, 1) > 0.5
-              ? Math.round(spotPrice)
-              : prev.strikePrice,
-        }));
-      } catch (error) {
-        console.error("Error fetching ticker market data:", error);
+        if (spotRes.status === "rejected") console.error("spot fetch failed:", spotRes.reason);
+        if (divRes.status === "rejected") console.error("dividend fetch failed:", divRes.reason);
+        if (volRes.status === "rejected") console.error("vol fetch failed:", volRes.reason);
+
+        setFormData((prev) => {
+          const spotPrice = spotRes.status === "fulfilled" ? spotRes.value : prev.spotPrice;
+          const dividendYield = divRes.status === "fulfilled" ? divRes.value : prev.dividendYield;
+          const volatility = volRes.status === "fulfilled" ? volRes.value : prev.volatility;
+          return {
+            ...prev,
+            spotPrice,
+            dividendYield,
+            volatility,
+            strikePrice:
+              prev.strikePrice <= 0 ||
+              Math.abs(prev.strikePrice - spotPrice) / Math.max(spotPrice, 1) > 0.5
+                ? Math.round(spotPrice)
+                : prev.strikePrice,
+          };
+        });
       } finally {
         if (!cancelled) setFetchingMarketData(false);
       }
@@ -372,17 +382,144 @@ export function ConfigForm({ onSubmit, isLoading, formData, setFormData }: Confi
             </div>
             {(formData.optionType.includes("knockout") ||
               formData.optionType.includes("knockin")) && (
-              <div className="form-group">
-                <label>Barrier Level ($)</label>
-                <input
-                  type="number"
-                  value={formData.barrierLevel || ""}
-                  onChange={(e) =>
-                    handleChange("barrierLevel", parseFloat(e.target.value))
-                  }
-                  step="0.01"
+              <>
+                <div className="form-group">
+                  <label>Barrier Level ($)</label>
+                  <input
+                    type="number"
+                    value={formData.barrierLevel || ""}
+                    onChange={(e) =>
+                      handleChange("barrierLevel", parseFloat(e.target.value))
+                    }
+                    step="0.01"
+                    disabled={isLoading}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Barrier Monitoring</label>
+                  <select
+                    value={formData.monitoring || "continuous"}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        monitoring: e.target.value as
+                          | "continuous"
+                          | "daily"
+                          | "weekly"
+                          | "monthly",
+                      }))
+                    }
+                    disabled={isLoading}
+                    data-testid="monitoring-select"
+                  >
+                    <option value="continuous">Continuous</option>
+                    <option value="daily">Daily</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="monthly">Monthly</option>
+                  </select>
+                  <span style={{ fontSize: "0.8rem", color: "#6b7280" }}>
+                    Discrete monitoring lifts barrier value vs continuous —
+                    daily/weekly/monthly fixings are how exotics actually trade.
+                  </span>
+                </div>
+              </>
+            )}
+            {(formData.optionType === "american_call" ||
+              formData.optionType === "american_put") && (
+              <div className="form-group" data-testid="dividend-schedule-group">
+                <label>Dividend Schedule</label>
+                <span style={{ fontSize: "0.8rem", color: "#6b7280", display: "block", marginBottom: "0.4rem" }}>
+                  Discrete dividends for American exercise. Leave empty to use
+                  the continuous yield above.
+                </span>
+                {(formData.dividendSchedule ?? []).map((row, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      display: "flex",
+                      gap: "0.4rem",
+                      alignItems: "center",
+                      marginBottom: "0.35rem",
+                    }}
+                    data-testid={`dividend-row-${idx}`}
+                  >
+                    <input
+                      type="date"
+                      value={row[0]}
+                      onChange={(e) => {
+                        const next = [...(formData.dividendSchedule ?? [])];
+                        next[idx] = [e.target.value, next[idx][1]];
+                        setFormData((prev) => ({ ...prev, dividendSchedule: next }));
+                      }}
+                      disabled={isLoading}
+                      style={{ flex: "2 1 0%" }}
+                    />
+                    <input
+                      type="number"
+                      value={Number.isFinite(row[1]) ? row[1] : 0}
+                      onChange={(e) => {
+                        const next = [...(formData.dividendSchedule ?? [])];
+                        const amt = parseFloat(e.target.value);
+                        next[idx] = [next[idx][0], Number.isFinite(amt) ? amt : 0];
+                        setFormData((prev) => ({ ...prev, dividendSchedule: next }));
+                      }}
+                      placeholder="amount $"
+                      step="0.01"
+                      min="0"
+                      disabled={isLoading}
+                      style={{ flex: "1 1 0%" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [...(formData.dividendSchedule ?? [])];
+                        next.splice(idx, 1);
+                        setFormData((prev) => ({
+                          ...prev,
+                          dividendSchedule: next.length > 0 ? next : undefined,
+                        }));
+                      }}
+                      disabled={isLoading}
+                      title="Remove dividend"
+                      aria-label="Remove dividend"
+                      style={{
+                        background: "transparent",
+                        border: "1px solid var(--border)",
+                        color: "var(--text-secondary)",
+                        borderRadius: "var(--radius-sm)",
+                        padding: "0.25rem 0.55rem",
+                        cursor: "pointer",
+                      }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const today = new Date().toISOString().split("T")[0];
+                    const next = [
+                      ...(formData.dividendSchedule ?? []),
+                      [today, 0] as [string, number],
+                    ];
+                    setFormData((prev) => ({ ...prev, dividendSchedule: next }));
+                  }}
                   disabled={isLoading}
-                />
+                  data-testid="add-dividend-btn"
+                  style={{
+                    background: "var(--accent-soft)",
+                    color: "var(--accent)",
+                    border: "1px solid var(--accent)",
+                    borderRadius: "var(--radius-sm)",
+                    padding: "0.35rem 0.75rem",
+                    cursor: "pointer",
+                    fontSize: "0.85rem",
+                    marginTop: "0.25rem",
+                  }}
+                >
+                  + Add dividend
+                </button>
               </div>
             )}
             {formData.optionType.startsWith("asian_") && (

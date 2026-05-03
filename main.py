@@ -79,6 +79,34 @@ Examples:
         print(f"  Strike: ${config.strike_price:.2f}")
         print(f"  Expiration: {config.days_to_expiration} days")
 
+        # Convert ISO-string dividend schedule to QL ql.Date tuples once;
+        # None when no schedule was specified, in which case the router uses
+        # the continuous-yield approximation.
+        ql_dividend_schedule = None
+        if config.dividend_schedule:
+            from datetime import date as _date
+            import QuantLib as ql_for_divs
+            ql_dividend_schedule = []
+            for entry in config.dividend_schedule:
+                iso, amount = entry[0], entry[1]
+                d = _date.fromisoformat(str(iso))
+                ql_dividend_schedule.append(
+                    (ql_for_divs.Date(d.day, d.month, d.year), float(amount))
+                )
+
+        # Discrete dividend schedules are only consumed by the American
+        # engines; the router's ``_ql_kwargs`` filter forwards only surface
+        # kwargs and would otherwise drop ``dividend_schedule`` for non-American
+        # products without a peep. Warn loudly so a CLI user does not believe
+        # discrete divs were applied when they were not.
+        if ql_dividend_schedule and not config.option_type.startswith("american_"):
+            logger.warning(
+                "dividend_schedule supplied for %s but only American options "
+                "consume discrete divs; ignoring. Use dividend_yield for "
+                "continuous q on this product.",
+                config.option_type,
+            )
+
         # Prepare pricing parameters
         pricing_params = {
             "S": config.spot_price,
@@ -91,6 +119,14 @@ Examples:
             "n_steps": config.n_steps,
             "variance_reduction": config.variance_reduction,
             "barrier_level": config.barrier_level,
+            # Barrier monitoring frequency. Defaults to "continuous" so the
+            # CLI matches the YAML loader default; flip to daily/weekly/monthly
+            # in the YAML to enable BGK-shifted barrier pricing.
+            "monitoring": config.monitoring,
+            # Discrete cash dividend schedule for American options. None =>
+            # continuous-yield approximation; non-empty => FDM with QL
+            # DividendSchedule.
+            "dividend_schedule": ql_dividend_schedule,
         }
 
         # Fetch market data if requested
@@ -200,8 +236,12 @@ Examples:
         greeks_params = {k: v for k, v in pricing_params.items() if k in [
             "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
             "barrier_level", "vol_handle",
+            "monitoring", "dividend_schedule",
         ]}
         greeks = greeks_func(**greeks_params)
+        # Drop the meta pin_risk flag from the dict the report sees so the
+        # numeric Greek loop below doesn't try to format a bool.
+        greeks.pop("pin_risk", None)
 
         print(f"\nGreeks:")
         for greek, value in greeks.items():

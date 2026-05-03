@@ -38,12 +38,16 @@ def route(option_type: str) -> Tuple[Callable, Callable, str]:
         "american_put": (
             _make_american_pricer("put"),
             _make_american_greeks("put"),
-            "QuantLib (American, Binomial Tree)" if QUANTLIB_AVAILABLE else "Monte Carlo LSM (American)",
+            # Price comes from the LR binomial tree; Greeks come from FDM
+            # (FdBlackScholesVanillaEngine) for smooth risk surfaces. The
+            # label must mention BOTH engines so report consumers don't
+            # misread the source of the Greeks.
+            "QuantLib (American, LR Tree price / FDM Greeks)" if QUANTLIB_AVAILABLE else "Monte Carlo LSM (American)",
         ),
         "american_call": (
             _make_american_pricer("call"),
             _make_american_greeks("call"),
-            "QuantLib (American, Binomial Tree)" if QUANTLIB_AVAILABLE else "Monte Carlo LSM (American)",
+            "QuantLib (American, LR Tree price / FDM Greeks)" if QUANTLIB_AVAILABLE else "Monte Carlo LSM (American)",
         ),
         "knockout_call": (
             _make_barrier_pricer("call", kind="out"),
@@ -145,7 +149,16 @@ def _make_european_greeks(opt: str) -> Callable:
 
 
 def _make_american_pricer(opt: str) -> Callable:
-    def pricer(S, K, r, sigma, T, q, n_paths=10000, n_steps=90, variance_reduction="none", **kwargs):
+    def pricer(S, K, r, sigma, T, q, n_paths=10000, n_steps=90, variance_reduction="none",
+               dividend_schedule=None, **kwargs):
+        # Discrete cash dividends defeat the continuous-yield approximation —
+        # route to the FDM engine that takes a DividendSchedule directly.
+        if QUANTLIB_AVAILABLE and dividend_schedule:
+            return quantlib_engine.price_american_discrete_div_ql(
+                S, K, r, sigma, T,
+                dividend_schedule=dividend_schedule, option_type=opt,
+                **_ql_kwargs(kwargs),
+            )
         if QUANTLIB_AVAILABLE:
             return quantlib_engine.price_american_ql(
                 S, K, r, sigma, T, q, n_steps=n_steps, option_type=opt,
@@ -157,12 +170,28 @@ def _make_american_pricer(opt: str) -> Callable:
 
 
 def _make_american_greeks(opt: str) -> Callable:
+    """Default American Greeks now come from the FDM engine — LR-tree-based
+    ``greeks_ql`` produces "ghost gamma" artefacts where adjacent strikes can
+    differ by 30%+ because the LR node grid is discrete. FDM uses a fixed
+    space/time grid + interpolation, giving smooth Greek surfaces suitable
+    for risk reporting and hedging. Tree-based Greeks remain available via
+    ``route_with_engine(engine="tree")`` for backward compatibility.
+
+    When a discrete ``dividend_schedule`` is supplied, every bump-reprice
+    runs against the same FDM-with-DividendSchedule engine so Greeks see the
+    spot drops on ex-div dates that drive American-call early exercise.
+    """
     def greeks(S, K, r, sigma, T, q, n_steps=201, n_paths=5000,
-               variance_reduction="antithetic", **kwargs):
+               variance_reduction="antithetic", dividend_schedule=None, **kwargs):
+        if QUANTLIB_AVAILABLE and dividend_schedule:
+            return quantlib_engine.greeks_american_discrete_div_ql(
+                S, K, r, sigma, T,
+                dividend_schedule=dividend_schedule, option_type=opt,
+                **_ql_kwargs(kwargs),
+            )
         if QUANTLIB_AVAILABLE:
-            return quantlib_engine.greeks_ql(
-                S, K, r, sigma, T, q, option_type=opt, is_american=True,
-                n_steps=n_steps,
+            return quantlib_engine.greeks_american_fdm_ql(
+                S, K, r, sigma, T, q, option_type=opt,
                 **_ql_kwargs(kwargs),
             )
         return monte_carlo_lsm.greeks_american(
@@ -331,8 +360,104 @@ def route_with_engine(option_type: str, engine: str = "auto") -> Tuple[Callable,
 
         return pricer, greeks, "Monte Carlo LSM (American, forced)"
 
-    if engine in ("analytic", "tree", "fdm"):
-        # Phase 1: these all collapse to the QL default for now.
+    # Tree (LR binomial) — keeps the legacy LR-tree Greeks for callers that
+    # explicitly want them (e.g. for parity with prior runs). Discrete cash
+    # dividends still route to the FDM-with-DividendSchedule engine because
+    # the LR tree cannot reproduce the spot-drop discontinuity.
+    if engine == "tree" and option_type in ("american_call", "american_put"):
+        opt = option_type.split("_")[1]
+
+        def pricer(S, K, r, sigma, T, q, n_paths=10000, n_steps=90,
+                   variance_reduction="none", dividend_schedule=None, **kwargs):
+            if QUANTLIB_AVAILABLE and dividend_schedule:
+                return quantlib_engine.price_american_discrete_div_ql(
+                    S, K, r, sigma, T,
+                    dividend_schedule=dividend_schedule, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            if QUANTLIB_AVAILABLE:
+                return quantlib_engine.price_american_ql(
+                    S, K, r, sigma, T, q, n_steps=n_steps, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            return monte_carlo_lsm.price_american(
+                S, K, r, sigma, T, q, n_paths, n_steps, variance_reduction,
+                option_type=opt,
+            )
+
+        def greeks(S, K, r, sigma, T, q, n_steps=201, n_paths=5000,
+                   variance_reduction="antithetic", dividend_schedule=None, **kwargs):
+            if QUANTLIB_AVAILABLE and dividend_schedule:
+                return quantlib_engine.greeks_american_discrete_div_ql(
+                    S, K, r, sigma, T,
+                    dividend_schedule=dividend_schedule, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            if QUANTLIB_AVAILABLE:
+                # The LR-tree path — explicit opt-in only.
+                return quantlib_engine.greeks_ql(
+                    S, K, r, sigma, T, q, option_type=opt, is_american=True,
+                    n_steps=n_steps,
+                    **_ql_kwargs(kwargs),
+                )
+            return monte_carlo_lsm.greeks_american(
+                S, K, r, sigma, T, q, n_paths=n_paths, n_steps=n_steps,
+                variance_reduction=variance_reduction, option_type=opt,
+            )
+
+        return pricer, greeks, "QuantLib (American, Binomial Tree, forced)"
+
+    # FDM — pricing AND Greeks via FdBlackScholesVanillaEngine. Smooth Greeks
+    # for hedging; this is the recommended engine for risk reporting.
+    if engine == "fdm" and option_type in ("american_call", "american_put"):
+        opt = option_type.split("_")[1]
+
+        def pricer(S, K, r, sigma, T, q, n_paths=10000, n_steps=90,
+                   variance_reduction="none", dividend_schedule=None, **kwargs):
+            if QUANTLIB_AVAILABLE and dividend_schedule:
+                return quantlib_engine.price_american_discrete_div_ql(
+                    S, K, r, sigma, T,
+                    dividend_schedule=dividend_schedule, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            if QUANTLIB_AVAILABLE:
+                return quantlib_engine.price_american_fdm_ql(
+                    S, K, r, sigma, T, q, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            return monte_carlo_lsm.price_american(
+                S, K, r, sigma, T, q, n_paths, n_steps, variance_reduction,
+                option_type=opt,
+            )
+
+        def greeks(S, K, r, sigma, T, q, n_steps=201, n_paths=5000,
+                   variance_reduction="antithetic", dividend_schedule=None, **kwargs):
+            if QUANTLIB_AVAILABLE and dividend_schedule:
+                return quantlib_engine.greeks_american_discrete_div_ql(
+                    S, K, r, sigma, T,
+                    dividend_schedule=dividend_schedule, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            if QUANTLIB_AVAILABLE:
+                return quantlib_engine.greeks_american_fdm_ql(
+                    S, K, r, sigma, T, q, option_type=opt,
+                    **_ql_kwargs(kwargs),
+                )
+            return monte_carlo_lsm.greeks_american(
+                S, K, r, sigma, T, q, n_paths=n_paths, n_steps=n_steps,
+                variance_reduction=variance_reduction, option_type=opt,
+            )
+
+        return pricer, greeks, "QuantLib (American, FDM)"
+
+    if engine == "analytic":
+        # No analytic American closed-form — fall back to QL default. Reserved
+        # for future use (e.g. Bjerksund-Stensland).
+        return route(option_type)
+
+    if engine in ("tree", "fdm"):
+        # Tree/FDM only meaningful for American options; for everything else
+        # fall back to the auto-routed default.
         return route(option_type)
 
     raise ValueError(

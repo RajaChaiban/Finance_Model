@@ -37,10 +37,10 @@ export function Header({ asOf, source }: HeaderProps) {
     <header className="vd-header" data-testid="vd-header">
       <div className="vd-header-inner">
         <div className="vd-brand">
-          <div className="vd-brand-mark" aria-hidden>AVD</div>
+          <div className="vd-brand-mark" aria-hidden>AP</div>
           <div className="vd-brand-text">
-            <span className="vd-brand-name">Azure Vol Desk</span>
-            <span className="vd-brand-tag">Derivatives Pricing &amp; Structuring</span>
+            <span className="vd-brand-name">ArgoPilot</span>
+            <span className="vd-brand-tag">Agentic Derivatives Pricing &amp; Structuring</span>
           </div>
         </div>
         <div className="vd-header-meta">

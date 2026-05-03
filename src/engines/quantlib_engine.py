@@ -557,6 +557,117 @@ def _price_american_fdm(S: float, K: float, r: float, sigma: float, T: float, q:
 
 
 @ql_locked
+def price_american_fdm_ql(
+    S: float, K: float, r: float, sigma: float, T: float, q: float,
+    option_type: str = 'put', n_t_steps: int = 200, n_x_steps: int = 200,
+    evaluation_date: Optional[ql.Date] = None,
+    vol_handle: Optional[ql.BlackVolTermStructureHandle] = None,
+    use_local_vol_pde: bool = False,
+) -> Tuple[float, float, None]:
+    """Price American option via Finite Difference Method (PDE).
+
+    Public wrapper around ``FdBlackScholesVanillaEngine`` for callers that
+    want FDM pricing (smooth Greeks via the matching ``greeks_american_fdm_ql``)
+    without going through the LR-tree default. Returns the standard
+    ``(price, std_error, paths)`` triple — ``std_error=0`` (deterministic),
+    ``paths=None``.
+
+    Args:
+        S, K, r, sigma, T, q: Standard option parameters.
+        option_type: 'call' or 'put'.
+        n_t_steps, n_x_steps: FDM grid (200x200 ~ 1bp accuracy).
+        evaluation_date: QL evaluation date (None -> today).
+        vol_handle: Optional Black vol surface (smile-aware FDM).
+        use_local_vol_pde: Reserved — vanilla FdBlackScholesVanillaEngine
+            already uses the supplied vol surface; flag is accepted for
+            signature symmetry with ``price_knockout_ql``.
+    """
+    today = _setup_evaluation_date(evaluation_date)
+    maturity = today + _days_from_T(T)
+
+    payoff = ql.PlainVanillaPayoff(
+        ql.Option.Call if option_type.lower() == 'call' else ql.Option.Put, K
+    )
+    exercise = ql.AmericanExercise(today, maturity)
+    option = ql.VanillaOption(payoff, exercise)
+
+    spot = ql.QuoteHandle(ql.SimpleQuote(S))
+    r_ts = ql.YieldTermStructureHandle(ql.FlatForward(today, r, ql.Actual365Fixed()))
+    q_ts = ql.YieldTermStructureHandle(ql.FlatForward(today, q, ql.Actual365Fixed()))
+    v_ts = _resolve_vol_handle(vol_handle, today, sigma)
+    process = ql.GeneralizedBlackScholesProcess(spot, q_ts, r_ts, v_ts)
+    engine = ql.FdBlackScholesVanillaEngine(process, n_t_steps, n_x_steps)
+    option.setPricingEngine(engine)
+
+    return float(option.NPV()), 0.0, None
+
+
+@ql_locked
+def greeks_american_discrete_div_ql(
+    S: float, K: float, r: float, sigma: float, T: float,
+    dividend_schedule, option_type: str = 'put',
+    n_t_steps: int = 200, n_x_steps: int = 200,
+    evaluation_date: Optional[ql.Date] = None,
+    vol_handle: Optional[ql.BlackVolTermStructureHandle] = None,
+) -> Dict[str, float]:
+    """Greeks for an American option with explicit cash dividends via FDM
+    bump-reprice.
+
+    Continuous-yield Greeks would not see the discrete spot drops on ex-div
+    dates, so every bump is repriced against the same
+    ``FdBlackScholesVanillaEngine`` + ``DividendSchedule`` configuration. The
+    FDM engine exposes delta/gamma/theta directly; vega/rho via central-
+    difference bump-reprice.
+    """
+    today = _setup_evaluation_date(evaluation_date)
+
+    def _build(S_, sigma_, T_, r_):
+        maturity_ = today + _days_from_T(T_)
+        payoff_ = ql.PlainVanillaPayoff(
+            ql.Option.Call if option_type.lower() == 'call' else ql.Option.Put, K
+        )
+        exercise_ = ql.AmericanExercise(today, maturity_)
+        opt_ = ql.VanillaOption(payoff_, exercise_)
+        spot_ = ql.QuoteHandle(ql.SimpleQuote(S_))
+        r_ts_ = ql.YieldTermStructureHandle(ql.FlatForward(today, r_, ql.Actual365Fixed()))
+        # Continuous q is fixed at 0 — discrete cash divs only.
+        q_ts_ = ql.YieldTermStructureHandle(ql.FlatForward(today, 0.0, ql.Actual365Fixed()))
+        v_ts_ = _resolve_vol_handle(vol_handle, today, sigma_)
+        proc_ = ql.GeneralizedBlackScholesProcess(spot_, q_ts_, r_ts_, v_ts_)
+        sched_ = ql.DividendSchedule()
+        for d, a in dividend_schedule:
+            sched_.append(ql.FixedDividend(float(a), d))
+        eng_ = ql.FdBlackScholesVanillaEngine(proc_, sched_, n_t_steps, n_x_steps)
+        opt_.setPricingEngine(eng_)
+        return opt_
+
+    base = _build(S, sigma, T, r)
+    price = float(base.NPV())
+    delta = float(base.delta())
+    gamma = float(base.gamma())
+    theta = float(base.theta()) / 365.0
+
+    eps_s = 0.005
+    p_vu = float(_build(S, sigma + eps_s, T, r).NPV())
+    p_vd = float(_build(S, sigma - eps_s, T, r).NPV())
+    vega = (p_vu - p_vd) / (2 * eps_s) * 0.01
+
+    eps_r = 0.0001
+    p_ru = float(_build(S, sigma, T, r + eps_r).NPV())
+    p_rd = float(_build(S, sigma, T, r - eps_r).NPV())
+    rho = (p_ru - p_rd) / (2 * eps_r) * 0.01
+
+    return {
+        "price": price,
+        "delta": delta,
+        "gamma": gamma,
+        "vega": vega,
+        "theta": theta,
+        "rho": rho,
+    }
+
+
+@ql_locked
 def greeks_american_fdm_ql(
     S: float, K: float, r: float, sigma: float, T: float, q: float,
     option_type: str = 'put', n_t_steps: int = 200, n_x_steps: int = 200,
@@ -689,16 +800,36 @@ def greeks_knockout_ql(S: float, K: float, B: float, r: float, sigma: float, T: 
     distance_to_barrier = abs(S - B)
     h_engine_floor = max(S * 0.001, 1e-3)  # ~engine accuracy
 
+    # PIN RISK: when S sits within the engine's accuracy floor of the
+    # barrier, BOTH the up-bump and down-bump straddle B. The central-
+    # difference numerator collapses to (any-shifted-side - knocked-side)
+    # and the resulting "Greeks" are pure numerical noise — frequently
+    # sign-flipped, sometimes orders-of-magnitude wrong. Returning bogus
+    # numbers here is worse than refusing: a hedger sees a finite delta,
+    # trades it, and lifts the wrong direction. Surface NaN + a pin_risk
+    # flag so the UI can hide the Greeks panel.
+    if distance_to_barrier < h_engine_floor:
+        logger.warning(
+            "S=%.4f is within engine floor of barrier B=%.4f; "
+            "Greeks NaN'd as pin_risk=True (delta/gamma/vega/theta/rho cannot "
+            "be computed reliably when bumps straddle the barrier)",
+            S, B,
+        )
+        nan = float("nan")
+        return {
+            "price": float(p_display),
+            "delta": nan,
+            "gamma": nan,
+            "vega": nan,
+            "theta": nan,
+            "rho": nan,
+            "pin_risk": True,
+        }
+
     if 2 * h_default <= 0.5 * distance_to_barrier:
         h = h_default
     else:
         h = max(0.25 * distance_to_barrier, h_engine_floor)
-        if distance_to_barrier < h_engine_floor:
-            logger.warning(
-                "S=%.4f is within engine floor of barrier B=%.4f; "
-                "bump-reprice Greeks dominated by pin risk and unreliable",
-                S, B,
-            )
     p_up, _, _ = price_knockout_ql(S + h, K, B, r, sigma, T, q, option_type,
                                    monitoring=monitoring, barrier_kind=barrier_kind)
     p_dn, _, _ = price_knockout_ql(S - h, K, B, r, sigma, T, q, option_type,
@@ -738,4 +869,5 @@ def greeks_knockout_ql(S: float, K: float, B: float, r: float, sigma: float, T: 
         "vega": float(vega),
         "theta": float(theta),
         "rho": float(rho),
+        "pin_risk": False,
     }

@@ -42,14 +42,20 @@ function cellBackground(value: number, min: number, max: number): string {
 function ScenarioGridTable({ grid }: { grid: ScenarioGrid }) {
   const { values, spot_axis, vol_axis } = grid;
 
-  // Flatten to find global min/max
+  // Flatten to find global min/max — skip NaN/non-finite cells so a bad
+  // scenario point doesn't blow up the colour scale.
   let min = Infinity;
   let max = -Infinity;
   for (const row of values) {
     for (const v of row) {
+      if (!Number.isFinite(v)) continue;
       if (v < min) min = v;
       if (v > max) max = v;
     }
+  }
+  if (!Number.isFinite(min) || !Number.isFinite(max)) {
+    min = 0;
+    max = 0;
   }
 
   return (
@@ -111,20 +117,28 @@ function ScenarioGridTable({ grid }: { grid: ScenarioGrid }) {
               >
                 ${s.toFixed(1)}
               </td>
-              {(values[ri] ?? []).map((cell, ci) => (
-                <td
-                  key={ci}
-                  style={{
-                    padding: "3px 6px",
-                    textAlign: "center",
-                    background: cellBackground(cell, min, max),
-                    borderRadius: "3px",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {cell.toFixed(2)}
-                </td>
-              ))}
+              {(values[ri] ?? []).map((cell, ci) => {
+                const safe = Number.isFinite(cell) ? cell : null;
+                return (
+                  <td
+                    key={ci}
+                    style={{
+                      padding: "3px 6px",
+                      textAlign: "center",
+                      background:
+                        safe === null
+                          ? "rgba(148, 163, 184, 0.12)"
+                          : cellBackground(safe, min, max),
+                      borderRadius: "3px",
+                      whiteSpace: "nowrap",
+                      color:
+                        safe === null ? "var(--text-muted)" : undefined,
+                    }}
+                  >
+                    {safe === null ? "—" : safe.toFixed(2)}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
@@ -139,8 +153,18 @@ function ScenarioGridTable({ grid }: { grid: ScenarioGrid }) {
 // ---------------------------------------------------------------------------
 
 function GammaLadderChart({ ladder }: { ladder: GammaLadderPoint[] }) {
-  // recharts needs a sorted array keyed by the x-axis field
-  const data = [...ladder].sort((a, b) => a.spot - b.spot);
+  // recharts needs a sorted array keyed by the x-axis field. Filter NaN
+  // points so a single bad sample doesn't blow up the axes.
+  const data = ladder
+    .filter(
+      (p) =>
+        Number.isFinite(p.spot) &&
+        Number.isFinite(p.delta) &&
+        Number.isFinite(p.gamma)
+    )
+    .slice()
+    .sort((a, b) => a.spot - b.spot);
+  if (data.length === 0) return null;
 
   return (
     <div data-testid="gamma-ladder-chart" style={{ width: "100%" }}>

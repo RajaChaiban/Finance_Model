@@ -1,9 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
 
 /**
- * Vol Desk platform — UI regression suite.
+ * ArgoPilot platform — UI regression suite.
  *
- * Covers the new platform layer (Header, IndexTickerStrip, MoversGrid,
+ * Covers the platform layer (Header, IndexTickerStrip, MoversGrid,
  * click-to-prefill, PayoffChart, GreeksBar) and asserts the existing
  * pricer + co-pilot mode-switch still work alongside it.
  *
@@ -35,14 +35,14 @@ async function waitForFormReady(page: Page) {
   );
 }
 
-test.describe("Azure Vol Desk — header & status pill", () => {
+test.describe("ArgoPilot — header & status pill", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
   });
 
   test("header renders with brand mark and clock", async ({ page }) => {
     await expect(page.getByTestId("vd-header")).toBeVisible();
-    await expect(page.getByText(/^Azure Vol Desk$/)).toBeVisible();
+    await expect(page.getByText(/^ArgoPilot$/)).toBeVisible();
     // Status pill is one of two states.
     const pill = page.locator(".vd-status-pill");
     await expect(pill).toBeVisible();
@@ -56,7 +56,7 @@ test.describe("Azure Vol Desk — header & status pill", () => {
   });
 });
 
-test.describe("Vol Desk — index ticker strip", () => {
+test.describe("ArgoPilot — index ticker strip", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await waitForMoversLoaded(page);
@@ -79,7 +79,7 @@ test.describe("Vol Desk — index ticker strip", () => {
   });
 });
 
-test.describe("Vol Desk — movers grid", () => {
+test.describe("ArgoPilot — movers grid", () => {
   test.beforeEach(async ({ page }) => {
     await page.goto("/");
     await waitForMoversLoaded(page);
@@ -120,7 +120,7 @@ test.describe("Vol Desk — movers grid", () => {
   });
 });
 
-test.describe("Vol Desk — payoff chart and Greeks bar appear after pricing", () => {
+test.describe("ArgoPilot — payoff chart and Greeks bar appear after pricing", () => {
   test("submits a European Call and renders both charts", async ({ page }) => {
     await page.goto("/");
     await waitForFormReady(page);
@@ -144,7 +144,7 @@ test.describe("Vol Desk — payoff chart and Greeks bar appear after pricing", (
   });
 });
 
-test.describe("Vol Desk — regressions on existing features", () => {
+test.describe("ArgoPilot — regressions on existing features", () => {
   test("mode switcher Pricer ↔ Co-pilot still works", async ({ page }) => {
     await page.goto("/");
 
@@ -201,7 +201,7 @@ test.describe("Vol Desk — regressions on existing features", () => {
   });
 });
 
-test.describe("Vol Desk — backend movers endpoint", () => {
+test.describe("ArgoPilot — backend movers endpoint", () => {
   test("/api/market/movers returns the expected shape", async ({ request }) => {
     const resp = await request.get("http://localhost:8002/api/market/movers");
     expect(resp.status()).toBe(200);

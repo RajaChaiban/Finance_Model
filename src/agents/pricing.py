@@ -16,7 +16,8 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Optional
+from datetime import date
+from typing import Any, List, Optional
 
 from src.engines import router
 
@@ -32,6 +33,53 @@ from .state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _convert_dividend_schedule(schedule: Optional[List]) -> Optional[List]:
+    """Convert a list of [iso_date_str, amount] pairs to [(ql.Date, amount)]
+    tuples ready for ``price_american_discrete_div_ql``.
+
+    Returns ``None`` when the input is None/empty so downstream router code
+    can use a simple truthiness check to decide between the discrete-div FDM
+    engine and the continuous-yield path.
+
+    Duplicated from ``src/api/handlers.py:_convert_dividend_schedule`` —
+    importing from the API layer would create a layering violation (agents
+    must not depend on the FastAPI surface). Keep these in sync.
+
+    Raises:
+        ValueError: malformed entry (bad ISO string, non-numeric amount, etc).
+    """
+    if not schedule:
+        return None
+    try:
+        import QuantLib as ql
+    except ImportError as exc:
+        raise ValueError(
+            "QuantLib not available; dividend_schedule requires QL"
+        ) from exc
+
+    converted = []
+    for i, entry in enumerate(schedule):
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise ValueError(
+                f"dividend_schedule[{i}] must be [iso_date_str, amount], got {entry!r}"
+            )
+        iso, amount = entry
+        try:
+            d = date.fromisoformat(str(iso))
+        except ValueError as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] date {iso!r} is not ISO YYYY-MM-DD: {exc}"
+            ) from exc
+        try:
+            amt = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] amount {amount!r} is not numeric: {exc}"
+            ) from exc
+        converted.append((ql.Date(d.day, d.month, d.year), amt))
+    return converted
 
 
 class PricingAgent(BaseAgent):
@@ -198,6 +246,19 @@ class PricingAgent(BaseAgent):
         if leg.option_type.startswith(("knockout_", "knockin_")):
             kwargs["barrier_level"] = leg.barrier_level
             kwargs["monitoring"] = leg.barrier_monitoring
+        if leg.option_type.startswith("american_") and leg.dividend_schedule:
+            kwargs["dividend_schedule"] = _convert_dividend_schedule(
+                leg.dividend_schedule
+            )
+        elif leg.dividend_schedule and not leg.option_type.startswith("american_"):
+            # Defensive: only American legs consume a discrete schedule. The
+            # parallel API-router fix logs the same warning on the API side
+            # so the two orchestration layers behave consistently.
+            logger.warning(
+                "dividend_schedule supplied on %s leg; only American legs "
+                "consume it - ignoring.",
+                leg.option_type,
+            )
 
         price, _std_err, _paths = pricer(**kwargs)
         greeks = greeks_fn(**kwargs)

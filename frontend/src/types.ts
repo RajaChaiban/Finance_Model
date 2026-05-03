@@ -27,6 +27,15 @@ export interface ConfigFormState {
   // Lookback (only used when optionType startsWith "lookback_")
   lookbackType?: "fixed" | "floating";
 
+  // Barrier monitoring frequency (only used when optionType startsWith
+  // "knockout_" or "knockin_"). Defaults to "continuous" if omitted.
+  monitoring?: "continuous" | "daily" | "weekly" | "monthly";
+
+  // Discrete dividend schedule (only used for American options). Each entry
+  // is a tuple of [iso_date_str, amount]. An empty list / undefined means
+  // "use the continuous yield instead".
+  dividendSchedule?: Array<[string, number]>;
+
   // Pricing Configuration
   nPaths: number;
   nSteps: number;
@@ -79,6 +88,15 @@ export interface PricingResult {
   sigmaBarrier?: number;
   surfaceQuotesInverted?: number;
   surfaceQuotesTotal?: number;
+
+  // Pin risk — true when spot is sitting on the barrier and Greeks are
+  // unreliable. The UI surfaces a warning banner when this is true.
+  pinRisk?: boolean;
+
+  // Bridge sigma rule — non-null (e.g. "max(sigma_K, sigma_B)") only when a
+  // vol surface is active on a barrier product. Rendered as a small caption
+  // near the σ display in the surface diagnostics block.
+  bridgeSigmaRule?: string | null;
 
   // Deep risk — populated only when deep_risk=true on the request
   scenarioGrid?: ScenarioGrid;

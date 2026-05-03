@@ -11,6 +11,21 @@ import { useMarketMovers } from "../hooks/useMarketMovers";
 
 type Mode = "pricer" | "copilot";
 
+// Index tickers (^GSPC, ^IXIC, ...) aren't valid yfinance lookups for
+// dividend yield and aren't what gets traded — desks price index options
+// against the corresponding ETF. Map index → ETF so the form gets a real
+// dividend yield, real strike granularity, and real options data.
+const INDEX_TO_ETF: Record<string, string> = {
+  "^GSPC": "SPY",
+  "^IXIC": "QQQ",
+  "^DJI": "DIA",
+  "^RUT": "IWM",
+};
+
+function resolveTicker(raw: string): string {
+  return INDEX_TO_ETF[raw] ?? raw;
+}
+
 export function Dashboard() {
   const [mode, setMode] = useState<Mode>("pricer");
   const [result, setResult] = useState<PricingResult | null>(null);
@@ -22,14 +37,19 @@ export function Dashboard() {
   const movers = useMarketMovers();
 
   const handlePickTicker = (ticker: string, price: number) => {
-    const spot = Math.round(price * 100) / 100;
+    const resolved = resolveTicker(ticker);
+    // When we map an index to its ETF, the click-time spot is the index
+    // level (e.g. ^GSPC=7230) and is meaningless for SPY (~720). Drop it
+    // and let ConfigForm's useEffect fetch the real ETF spot.
+    const useClickSpot = resolved === ticker;
+    const spot = useClickSpot ? Math.round(price * 100) / 100 : 0;
     setMode("pricer");
     setActiveStep(1);
     setFormData((prev) => ({
       ...prev,
-      underlying: ticker.replace("^", ""),
+      underlying: resolved,
       spotPrice: spot,
-      strikePrice: Math.round(spot),
+      strikePrice: spot > 0 ? Math.round(spot) : 0,
     }));
     setTimeout(() => {
       configRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -39,6 +59,10 @@ export function Dashboard() {
   const handlePricingSubmit = async (config: ConfigFormState) => {
     setIsLoading(true);
     try {
+      const isBarrier =
+        config.optionType.startsWith("knockout_") ||
+        config.optionType.startsWith("knockin_");
+      const isAmerican = config.optionType.startsWith("american_");
       const request = {
         option_type: config.optionType,
         underlying: config.underlying,
@@ -55,6 +79,17 @@ export function Dashboard() {
         averaging_method: config.averagingMethod,
         averaging_frequency: config.averagingFrequency,
         lookback_type: config.lookbackType,
+        // Only forward `monitoring` for barrier products; the backend
+        // ignores it elsewhere but we keep payloads tight.
+        monitoring: isBarrier ? config.monitoring : undefined,
+        // Empty schedule is sent as `undefined` so the backend treats it as
+        // "use continuous q" rather than "no dividends at all".
+        dividend_schedule:
+          isAmerican &&
+          config.dividendSchedule &&
+          config.dividendSchedule.length > 0
+            ? config.dividendSchedule
+            : undefined,
         engine: config.engine ?? "auto",
         use_vol_surface: config.useVolSurface,
         deep_risk: config.deepRisk,
@@ -78,6 +113,8 @@ export function Dashboard() {
         sigmaBarrier: response.sigma_barrier,
         surfaceQuotesInverted: response.surface_quotes_inverted,
         surfaceQuotesTotal: response.surface_quotes_total,
+        pinRisk: response.pin_risk,
+        bridgeSigmaRule: response.bridge_sigma_rule,
         scenarioGrid: response.scenario_grid,
         gammaLadder: response.gamma_ladder,
       };
@@ -103,6 +140,7 @@ export function Dashboard() {
           <IndexTickerStrip
             indices={movers.data?.indices ?? []}
             isLoading={movers.isLoading}
+            onPickTicker={handlePickTicker}
           />
         </div>
       </div>

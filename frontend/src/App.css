@@ -5,7 +5,7 @@
 }
 
 /* ============================================================
-   Design tokens — Azure Vol Desk light theme
+   Design tokens — ArgoPilot light theme
    Sky-azure primary on white / slate-50 surfaces.
    Generated via Stitch design system asset 16771735188229378415.
    ============================================================ */
@@ -1109,7 +1109,7 @@ body {
 }
 
 /* ============================================================
-   Azure Vol Desk — top platform layer
+   ArgoPilot — top platform layer
    Header • Index ticker strip • Movers grid • Charts
    ============================================================ */
 
@@ -1250,6 +1250,21 @@ body {
 .vd-index-card:hover {
   border-color: var(--border-strong);
   transform: translateY(-1px);
+}
+.vd-index-card-clickable {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  width: 100%;
+}
+.vd-index-card-clickable:hover {
+  border-color: var(--accent, var(--border-strong));
+  box-shadow: 0 4px 14px rgba(14, 116, 220, 0.12);
+}
+.vd-index-card-clickable:focus-visible {
+  outline: 2px solid var(--accent, #0e74dc);
+  outline-offset: 2px;
 }
 .vd-index-row {
   display: flex;

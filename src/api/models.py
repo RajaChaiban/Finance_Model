@@ -32,6 +32,22 @@ class PricingRequest(BaseModel):
     # Optional barrier level for barrier options
     barrier_level: Optional[float] = Field(default=None, description="Barrier level for knockout options")
     barrier_type: Optional[str] = Field(default=None, description="Barrier type: 'down_and_out' or 'up_and_out'")
+    # Barrier monitoring frequency. "continuous" (default) keeps the analytic
+    # Reiner-Rubinstein result; daily/weekly/monthly trigger the BGK shift on B
+    # before pricing so the discretely-monitored knock-probability is corrected.
+    monitoring: Literal["continuous", "daily", "weekly", "monthly"] = Field(
+        default="continuous",
+        description="Barrier monitoring: continuous|daily|weekly|monthly (BGK shift for discrete)",
+    )
+
+    # Optional discrete cash dividend schedule for American options. List of
+    # ``[iso_date_str, amount_float]`` pairs. When non-empty, routes American
+    # pricing to ``price_american_discrete_div_ql`` (FDM with explicit divs)
+    # instead of the continuous-yield approximation.
+    dividend_schedule: Optional[List[List]] = Field(
+        default=None,
+        description="Discrete cash dividends: list of [iso_date_str, amount] pairs",
+    )
 
     # Optional Asian fields (only used when option_type starts with 'asian_')
     averaging_method: Optional[str] = Field(default=None, description="Asian averaging: 'geometric' or 'arithmetic'")
@@ -97,6 +113,21 @@ class PricingResult(BaseModel):
     # Deep risk (populated only when request.deep_risk=True).
     scenario_grid: Optional[SensitivityBlock] = Field(None, description="Price grid across spot x vol shifts")
     gamma_ladder: Optional[List[Dict[str, float]]] = Field(None, description="Delta and gamma across spot levels")
+
+    # Pin risk: True when KO/KI bump-reprice Greeks would straddle the barrier
+    # (S sits within the engine's accuracy floor of B). When True, delta/gamma/
+    # vega/theta/rho are NaN and the UI should hide the Greeks panel + warn.
+    pin_risk: bool = Field(default=False, description="True when S is on the barrier; Greeks NaN")
+
+    # Bridge σ rule: documents how the closed-form scalar σ was sampled from
+    # the live surface. Surfaced only when surface_status="ok" AND product is
+    # KO/KI; None otherwise. Today the only rule is "max(sigma_K, sigma_B)";
+    # this field exists so a future change (e.g. barrier-only σ for one-touch)
+    # can advertise itself to the client without a schema migration.
+    bridge_sigma_rule: Optional[str] = Field(
+        default=None,
+        description="Surface-to-scalar σ rule for closed-form bridge (KO/KI under live surface)",
+    )
 
 
 class ErrorResponse(BaseModel):

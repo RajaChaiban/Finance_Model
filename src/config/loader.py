@@ -1,9 +1,9 @@
 """Config loader for derivatives pricing pipeline."""
 
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 
 @dataclass
@@ -27,6 +27,15 @@ class PricingConfig:
     # Optional barrier (for knockout options)
     barrier_level: Optional[float] = None
     barrier_type: Optional[str] = None
+    # Barrier monitoring frequency. Defaults to "continuous" for backwards
+    # compatibility (matches the analytic Reiner-Rubinstein assumption); set
+    # to "daily" / "weekly" / "monthly" to trigger the BGK shift on B.
+    monitoring: str = "continuous"
+
+    # Optional discrete cash dividend schedule for American options.
+    # List of (iso_date_str, amount_float) pairs. None = use continuous
+    # dividend_yield instead (default behaviour).
+    dividend_schedule: Optional[List[List]] = None
 
     # Optional Asian fields
     averaging_method: Optional[str] = None       # "geometric" | "arithmetic"
@@ -95,6 +104,26 @@ class PricingConfig:
 
         if self.variance_reduction not in ["none", "antithetic"]:
             errors.append(f"variance_reduction must be 'none' or 'antithetic', got '{self.variance_reduction}'")
+
+        # Monitoring frequency. Must match what the engines accept.
+        if self.monitoring not in ("continuous", "daily", "weekly", "monthly"):
+            errors.append(
+                f"monitoring must be one of 'continuous'|'daily'|'weekly'|'monthly', got '{self.monitoring}'"
+            )
+
+        # Dividend schedule: shape check only (date validity is checked at
+        # conversion time in handlers/main).
+        if self.dividend_schedule is not None:
+            if not isinstance(self.dividend_schedule, (list, tuple)):
+                errors.append(
+                    f"dividend_schedule must be a list of [iso_date, amount] pairs, got {type(self.dividend_schedule).__name__}"
+                )
+            else:
+                for i, entry in enumerate(self.dividend_schedule):
+                    if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+                        errors.append(
+                            f"dividend_schedule[{i}] must be a [iso_date, amount] pair, got {entry!r}"
+                        )
 
         # Barrier (KO and KI both require a barrier_level + direction).
         if "knockout" in self.option_type or "knockin" in self.option_type:
@@ -189,6 +218,12 @@ def load_config(config_path: str) -> PricingConfig:
         # Barrier
         "barrier_level": option_cfg.get("barrier_level"),
         "barrier_type": option_cfg.get("barrier_type"),
+        "monitoring": option_cfg.get("monitoring", "continuous"),
+
+        # Discrete dividend schedule (American options only). Read from the
+        # ``option:`` section as a list of [iso_date, amount] pairs. None =>
+        # use continuous dividend_yield (default).
+        "dividend_schedule": option_cfg.get("dividend_schedule"),
 
         # Asian / lookback (optional; defaulted in _validate)
         "averaging_method": option_cfg.get("averaging_method"),

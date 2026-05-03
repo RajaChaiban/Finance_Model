@@ -3,17 +3,18 @@ import { MoverRow } from "../api/client";
 
 interface IndexCardProps {
   row: MoverRow;
+  onPickTicker?: (ticker: string, price: number) => void;
 }
 
-function IndexCard({ row }: IndexCardProps) {
+function IndexCard({ row, onPickTicker }: IndexCardProps) {
   const up = row.change_pct >= 0;
   const data = row.spark.map((c, i) => ({ i, c }));
   const colorStroke = up ? "var(--success)" : "var(--danger)";
-  const colorFill = up ? "rgba(16,185,129,0.18)" : "rgba(239,68,68,0.18)";
   const display = row.ticker.replace("^", "");
+  const clickable = Boolean(onPickTicker);
 
-  return (
-    <div className="vd-index-card">
+  const inner = (
+    <>
       <div className="vd-index-row">
         <span className="vd-index-ticker">{display}</span>
         <span className={`vd-index-change ${up ? "up" : "down"}`}>
@@ -43,16 +44,32 @@ function IndexCard({ row }: IndexCardProps) {
           </AreaChart>
         </ResponsiveContainer>
       </div>
-    </div>
+    </>
+  );
+
+  if (!clickable) {
+    return <div className="vd-index-card">{inner}</div>;
+  }
+
+  return (
+    <button
+      type="button"
+      className="vd-index-card vd-index-card-clickable"
+      onClick={() => onPickTicker!(row.ticker, row.price)}
+      aria-label={`Load ${display} into the pricer`}
+    >
+      {inner}
+    </button>
   );
 }
 
 interface IndexTickerStripProps {
   indices: MoverRow[];
   isLoading?: boolean;
+  onPickTicker?: (ticker: string, price: number) => void;
 }
 
-export function IndexTickerStrip({ indices, isLoading }: IndexTickerStripProps) {
+export function IndexTickerStrip({ indices, isLoading, onPickTicker }: IndexTickerStripProps) {
   if (isLoading && indices.length === 0) {
     return (
       <div className="vd-index-strip" data-testid="vd-index-strip">
@@ -65,7 +82,7 @@ export function IndexTickerStrip({ indices, isLoading }: IndexTickerStripProps) 
   return (
     <div className="vd-index-strip" data-testid="vd-index-strip">
       {indices.map((row) => (
-        <IndexCard key={row.ticker} row={row} />
+        <IndexCard key={row.ticker} row={row} onPickTicker={onPickTicker} />
       ))}
     </div>
   );

@@ -1,9 +1,9 @@
-# Vol Desk — Derivatives Pricing Platform
+# ArgoPilot — Agentic Derivatives Pricing Platform
 
-A FastAPI + React vol-desk platform for pricing equity options against a calibrated implied-vol surface, with a multi-agent structuring co-pilot layered on top.
+A FastAPI + React platform for pricing equity options against a calibrated implied-vol surface, with a multi-agent structuring co-pilot layered on top.
 
 ```
-Vol Desk Platform
+ArgoPilot Platform
 ├── Market intelligence layer    Live indices, top movers, HV30 ranking
 ├── Quick Pricer                 8 vanilla/barrier/Asian/lookback products via QuantLib
 └── Structuring Co-pilot         7-agent planner+specialists workflow (Gemini-driven)
@@ -72,7 +72,7 @@ Backend (`src/api/main.py`):
 - `GET /api/market/risk-free-rate?days_to_expiration=…`
 - `GET /api/market/historical-volatility?ticker=…&lookback_days=…`
 - `GET /api/market/dividend-info?ticker=…`
-- `GET /api/market/movers?universe=default` — Vol Desk dashboard payload (60s cache)
+- `GET /api/market/movers?universe=default` — ArgoPilot dashboard payload (60s cache)
 - `POST /api/price` — full pricing + Greeks + HTML report
 
 Agent router (`src/api/agent_router.py`, mounted at `/api/agent/*`):
@@ -98,7 +98,7 @@ Coverage layers: parity/no-arb identities, closed-form references (BS, Reiner-Ru
 - **`QUANTLIB_INTEGRATION.md`** — QL migration history and engine choice rationale
 - **`SOLVER_COMPONENT.md`** — implied-vol solver internals
 - **`CLAUDE.md`** — directory map and search guidance for AI agents working in this repo
-- **`docs/superpowers/specs/`** — design specs for major features (e.g. Vol Desk platform UI)
+- **`docs/superpowers/specs/`** — design specs for major features (e.g. ArgoPilot platform UI)
 - **`docs/superpowers/plans/`** — implementation plans
 - **`raja_notes/`** — learning notes (gitignored, local only)
 
@@ -108,7 +108,7 @@ Coverage layers: parity/no-arb identities, closed-form references (BS, Reiner-Ru
 - Production-grade QuantLib integration (binomial, FDM-LV, analytic barrier, lookback, Asian)
 - Smile-aware pricing with live SPY surface calibration
 - 7-agent structuring co-pilot (Intake → Strategist → Pricing → Scenario → Validator → Narrator with HITL gates)
-- Vol Desk platform UI (live movers, mode switcher, payoff chart, Greeks bar)
+- ArgoPilot platform UI (live movers, mode switcher, payoff chart, Greeks bar)
 
 ## License
 

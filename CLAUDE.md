@@ -32,7 +32,7 @@ When asked about a topic, check these locations **in this order** before searchi
 | **CLI batch pricing** | `main.py` (root) | `configs/*.yaml`, `src/config/loader.py` |
 | **HTML reports** | `src/report/generator.py` | output goes to `reports/` (gitignored) |
 | **Tests (backend)** | `tests/` (one file per topic, e.g. `test_asian.py`, `test_knockin.py`) | `tests/fixtures/demo_replay.json` for agent replay |
-| **Tests (e2e)** | `frontend/tests/pricing-pipeline.spec.ts`, `frontend/tests/vol-desk-platform.spec.ts` | `frontend/playwright.config.ts` |
+| **Tests (e2e)** | `frontend/tests/pricing-pipeline.spec.ts`, `frontend/tests/argopilot.spec.ts` | `frontend/playwright.config.ts` |
 | **Design specs / plans** | `docs/superpowers/specs/`, `docs/superpowers/plans/` | — |
 
 ## Map of the repo

@@ -225,6 +225,19 @@ export function ReportDisplay({
             </>
           )}
           </>}
+          {result.bridgeSigmaRule && (
+            <div
+              className="surface-bridge-rule"
+              data-testid="bridge-sigma-rule"
+              style={{
+                marginTop: "0.4rem",
+                fontSize: "0.78rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              σ rule: <span style={{ color: "var(--text-secondary)" }}>{result.bridgeSigmaRule}</span>
+            </div>
+          )}
         </div>
           );
         })()
@@ -239,7 +252,7 @@ export function ReportDisplay({
             premium={result.price}
             barrier={barrier}
           />
-          <GreeksBar greeks={result.greeks} />
+          <GreeksBar greeks={result.greeks} pinRisk={result.pinRisk} />
         </div>
       )}
 

@@ -24,6 +24,8 @@ export interface PricingRequest {
   averaging_method?: "geometric" | "arithmetic";
   averaging_frequency?: "daily" | "weekly" | "monthly";
   lookback_type?: "fixed" | "floating";
+  monitoring?: "continuous" | "daily" | "weekly" | "monthly";
+  dividend_schedule?: Array<[string, number]>;
   engine?: "auto" | "analytic" | "tree" | "mc" | "fdm";
   use_vol_surface?: boolean;
   vol_surface_max_expiries?: number;
@@ -78,6 +80,10 @@ export interface PricingResult {
   sigma_barrier?: number;
   surface_quotes_inverted?: number;
   surface_quotes_total?: number;
+
+  // Pin risk + bridge-sigma rule — see PricingResult in types.ts
+  pin_risk?: boolean;
+  bridge_sigma_rule?: string | null;
 
   // Deep risk — populated only when deep_risk=true on the request
   scenario_grid?: ScenarioGridRaw;

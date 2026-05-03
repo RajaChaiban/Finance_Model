@@ -89,6 +89,8 @@ try:  # pragma: no cover — covered by both branches at import time
 except ImportError:  # pragma: no cover
     logger = _stdlib_logging.getLogger("market_intelligence")
 
+from .prompts import load_prompt
+
 
 # =====================================================================
 # Types
@@ -325,92 +327,13 @@ class RetrievalEngine:
 # =====================================================================
 
 class PromptManager:
-    SYSTEM_MARKET_INTELLIGENCE = (
-        "You are a senior equity-derivatives strategist on a vol desk with "
-        "15+ years across single-stock options, index vol, and listed/OTC "
-        "exotics (vanilla, knock-out/knock-in barriers, Asian, lookback). "
-        "You synthesise dealer commentary, listed quotes, and comparable "
-        "OTC trades into actionable market context for structurers.\n\n"
-        "Your responses should:\n"
-        "1. Be specific and evidence-based — cite vol points, bps of spot, "
-        "or skew levels rather than generic adjectives\n"
-        "2. Reference comparable trades or recent prints when available\n"
-        "3. Frame in terms of skew, term structure, realised-vs-implied, "
-        "and barrier proximity where relevant\n"
-        "4. Flag uncertainties and regime caveats\n"
-        "5. Stay under 8 sentences"
-    )
+    SYSTEM_MARKET_INTELLIGENCE = load_prompt("market_intelligence/system_market_intelligence.md")
+    SYSTEM_PRICING = load_prompt("market_intelligence/system_pricing.md")
+    SYSTEM_DEAL_ANALYSIS = load_prompt("market_intelligence/system_deal_analysis.md")
 
-    SYSTEM_PRICING = (
-        "You are an equity-derivatives pricing expert. You compare a model "
-        "price (QuantLib) against recent comparable trades and listed "
-        "reference levels to flag whether the quote is rich, cheap, or "
-        "in line with market.\n\n"
-        "When analysing pricing:\n"
-        "1. Quote in bps of spot or premium-of-notional, not abstract spread\n"
-        "2. Reference dated comparable trades when present in the corpus\n"
-        "3. Explain drivers — skew, term-structure slope, barrier proximity, "
-        "discrete-monitoring shift, hedging-cost premium\n"
-        "4. Provide a range, not a point estimate\n"
-        "5. Note assumptions (vol surface, monitoring frequency, dividends)"
-    )
-
-    SYSTEM_DEAL_ANALYSIS = (
-        "You are an expert in equity-derivatives structuring. You position a "
-        "candidate trade against the corpus of recent prints and dealer "
-        "commentary to surface precedent, outliers, and execution risks.\n\n"
-        "When analysing a structure:\n"
-        "1. Extract the payoff shape, tenor, strikes, barriers, monitoring\n"
-        "2. Identify hedging risks (pin, gap, vega-of-vega, correlation)\n"
-        "3. Highlight unusual barrier placement, tenor, or notional vs. corpus\n"
-        "4. Compare explicitly to the closest precedent — call out if there "
-        "is no precedent or no comparable trade in the corpus\n"
-        "5. Summarise in 5-7 sentences"
-    )
-
-    TEMPLATE_MARKET_WINDOW = (
-        "Based on the following recent prints and listed reference data, "
-        "assess the current market window for {asset_class} option-issuance "
-        "and structuring activity:\n\n"
-        "Recent Trades / Prints:\n{recent_deals}\n\n"
-        "Market Data (vol surface, skew, term structure):\n{market_data}\n\n"
-        "Provide:\n"
-        "1. Whether the market window is OPEN / CAUTIOUS / CLOSED for "
-        "vanilla and barrier structures\n"
-        "2. Liquidity and bid-ask by structure type (vanilla, KO/KI, Asian, "
-        "lookback)\n"
-        "3. Key tailwinds or headwinds (earnings, macro, skew regime)\n"
-        "4. Conditions that would shift the window"
-    )
-
-    TEMPLATE_PRICING_BENCHMARK = (
-        "Based on recent comparable prints and listed reference levels, "
-        "provide pricing benchmarks for a {tranche_type} structure on "
-        "{asset_class}:\n\n"
-        "Comparable Trades:\n{comparable_deals}\n\n"
-        "Current Market Conditions:\n{market_conditions}\n\n"
-        "Provide:\n"
-        "1. Current pricing range in bps of spot (or premium-of-notional)\n"
-        "2. Historical context where the corpus supports it\n"
-        "3. Key pricing drivers — skew, term structure, barrier proximity, "
-        "hedging-cost premium\n"
-        "4. Range of plausible outcomes\n"
-        "5. Confidence level (high/medium/low) and what would tighten it"
-    )
-
-    TEMPLATE_DEAL_INTELLIGENCE = (
-        "Analyse the following {asset_class} option structure and provide "
-        "market-context intelligence:\n\n"
-        "Deal / Structure Summary:\n{deal_summary}\n\n"
-        "Corpus Comparables:\n{comparables}\n\n"
-        "Provide:\n"
-        "1. Where this structure sits in the corpus — is it typical, an "
-        "outlier, or with no comparable / no precedent?\n"
-        "2. Hedging and execution risks (pin, gap, vega, correlation)\n"
-        "3. Likely investor / counterparty type\n"
-        "4. Pricing posture vs. comparables\n"
-        "5. Key risks and mitigants"
-    )
+    TEMPLATE_MARKET_WINDOW = load_prompt("market_intelligence/template_market_window.md")
+    TEMPLATE_PRICING_BENCHMARK = load_prompt("market_intelligence/template_pricing_benchmark.md")
+    TEMPLATE_DEAL_INTELLIGENCE = load_prompt("market_intelligence/template_deal_intelligence.md")
 
     @staticmethod
     def format_deal_data(deal: Dict[str, Any]) -> str:
