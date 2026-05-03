@@ -312,6 +312,14 @@ class OrchestratorAgent:
                     # Approved — build regime then run strategist.
                     self._emit(session, "agent_started", "RegimeBuild")
                     session.regime = self._build_regime(session.objective)
+                    # Smile-aware pricing path (opt-in, default OFF). Builds a
+                    # QuantLib ``BlackVarianceSurface`` from the live option
+                    # chain and stows the handle on ``session.vol_handle``;
+                    # PricingAgent then forwards it to the router. On any
+                    # failure we log and fall through — pricing keeps the
+                    # scalar-σ path so the session still completes.
+                    if session.use_vol_surface:
+                        self._maybe_build_vol_surface(session)
                     session.status = SessionStatus.PENDING_STRATEGIST
                     self.store.update(session)
                     self._emit(session, "agent_finished", "RegimeBuild")
@@ -462,6 +470,71 @@ class OrchestratorAgent:
             else:
                 regime.vol_regime = "normal"
         return regime
+
+    # ------------------------------------------------------------------
+    # Smile-aware surface build (opt-in). Mirrors src/api/handlers.py:88-112.
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _maybe_build_vol_surface(session: StructuringSession) -> None:
+        """Best-effort: build a live IV surface and attach the handle.
+
+        Mirrors the pattern in ``src/api/handlers.py:88-112``. Skips
+        gracefully when the regime is a placeholder fallback (no real spot
+        was fetched), when the option chain is empty, or when any layer of
+        the surface stack raises — in every failure mode we log a warning
+        and leave ``session.vol_handle`` unset, so PricingAgent falls
+        through to the scalar-σ path.
+        """
+        regime = session.regime
+        if regime is None:
+            return
+        # Detect the orchestrator's $100 placeholder spot. The regime build
+        # appends "Spot price missing; using $100 placeholder." when yfinance
+        # came back empty; in that case there's no point hitting Yahoo for
+        # an option chain it doesn't have either.
+        if any("placeholder" in w.lower() for w in regime.data_source_warnings):
+            logger.info(
+                "Skipping vol-surface build for %s: regime is placeholder.",
+                regime.underlying,
+            )
+            return
+        try:
+            import QuantLib as ql
+            from src.api.market_data import fetch_option_chain
+            from src.data.iv_grid import build_iv_grid
+            from src.data.vol_surface import build_vol_surface
+
+            logger.info("Building live IV surface for %s...", regime.underlying)
+            chain = fetch_option_chain(regime.underlying, max_expiries=6)
+            if not chain:
+                logger.warning(
+                    "Empty option chain for %s; falling back to scalar σ.",
+                    regime.underlying,
+                )
+                return
+            grid = build_iv_grid(
+                chain,
+                S=regime.spot,
+                r=regime.risk_free_rate,
+                q=regime.dividend_yield,
+                min_success_rate=0.4,
+            )
+            surface = build_vol_surface(grid)
+            session.vol_handle = ql.BlackVolTermStructureHandle(surface)
+            logger.info(
+                "Surface built for %s: %d/%d quotes inverted.",
+                regime.underlying,
+                grid.n_quotes_inverted,
+                grid.n_quotes_total,
+            )
+        except Exception as exc:  # noqa: BLE001 — surface build is best-effort
+            logger.warning(
+                "Surface build failed for %s (%s); falling back to scalar σ.",
+                regime.underlying,
+                exc,
+            )
+            session.vol_handle = None
 
     # ------------------------------------------------------------------
     # Helpers

@@ -94,9 +94,14 @@ class PricingAgent(BaseAgent):
         if session.regime is None:
             raise AgentError("Cannot price without a MarketRegime.")
 
+        # Forward the (optional) BlackVolTermStructureHandle the orchestrator
+        # built when ``session.use_vol_surface`` was on. None preserves the
+        # scalar-σ path used by every existing test/caller.
+        vol_handle = getattr(session, "vol_handle", None)
+
         priced: list[PricedCandidate] = []
         for cand in session.candidates:
-            priced.append(self._price_candidate(cand, session.regime))
+            priced.append(self._price_candidate(cand, session.regime, vol_handle))
 
         session.priced = priced
 
@@ -163,7 +168,12 @@ class PricingAgent(BaseAgent):
     # Per-candidate
     # ------------------------------------------------------------------
 
-    def _price_candidate(self, cand: Candidate, regime: MarketRegime) -> PricedCandidate:
+    def _price_candidate(
+        self,
+        cand: Candidate,
+        regime: MarketRegime,
+        vol_handle: Optional[Any] = None,
+    ) -> PricedCandidate:
         sigma = self._pick_sigma(regime)
 
         per_leg_prices: list[float] = []
@@ -175,7 +185,7 @@ class PricingAgent(BaseAgent):
 
         for leg in cand.legs:
             try:
-                price, greeks, method = self._price_leg(leg, regime, sigma)
+                price, greeks, method = self._price_leg(leg, regime, sigma, vol_handle)
             except Exception as exc:  # noqa: BLE001 — engine boundary
                 feasible = False
                 feasibility_notes.append(
@@ -230,7 +240,10 @@ class PricingAgent(BaseAgent):
 
     @staticmethod
     def _price_leg(
-        leg: Leg, regime: MarketRegime, sigma: float
+        leg: Leg,
+        regime: MarketRegime,
+        sigma: float,
+        vol_handle: Optional[Any] = None,
     ) -> tuple[float, dict, str]:
         pricer, greeks_fn, method = router.route(leg.option_type)
         T = leg.expiry_days / 365.0
@@ -259,6 +272,21 @@ class PricingAgent(BaseAgent):
                 "consume it - ignoring.",
                 leg.option_type,
             )
+
+        # Smile-aware path (mirrors src/api/handlers.py:88-135). When the
+        # orchestrator built a ``BlackVolTermStructureHandle`` we forward it
+        # AND, for barrier products, force the FD-with-local-vol PDE — the
+        # analytic Reiner-Rubinstein engine collapses the smile to a scalar
+        # and mis-prices the knock-probability term (see architecture.md
+        # "Smile-aware pricing"). For vanillas the QL analytic engine
+        # consumes the handle directly. NOTE: greeks plumbing here is
+        # whatever the existing per-engine ``greeks_fn`` does — see the
+        # out-of-scope note in the change summary about the API layer's
+        # flat-σ-bumping pattern, which the agent flow does not (yet) mirror.
+        if vol_handle is not None:
+            kwargs["vol_handle"] = vol_handle
+            if leg.option_type.startswith(("knockout_", "knockin_")):
+                kwargs["use_local_vol_pde"] = True
 
         price, _std_err, _paths = pricer(**kwargs)
         greeks = greeks_fn(**kwargs)

@@ -365,13 +365,33 @@ class AuditEntry(BaseModel):
 class StructuringSession(BaseModel):
     """Single source of truth carried through the agent pipeline."""
 
-    model_config = ConfigDict(extra="forbid")
+    # ``arbitrary_types_allowed`` is required so the transient ``vol_handle``
+    # field below (a ``ql.BlackVolTermStructureHandle``) can live on the
+    # session model without Pydantic trying to introspect/validate the QL C++
+    # object. The handle is excluded from serialization (see Field below).
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     session_id: str = Field(default_factory=lambda: str(uuid4()))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     status: SessionStatus = SessionStatus.PENDING_INTAKE
+
+    # Smile-aware pricing flag (Phase-2 plumbing). When True, the orchestrator
+    # builds a ``BlackVarianceSurface`` from the live option chain after the
+    # regime is fetched, stows it on ``vol_handle`` below, and the
+    # PricingAgent forwards it to ``router.route`` (mirrors handlers.py).
+    # Default False preserves the historical scalar-σ behaviour for every
+    # existing caller (REST, tests, demos).
+    use_vol_surface: bool = False
+
+    # Transient QuantLib ``BlackVolTermStructureHandle`` built by the
+    # orchestrator when ``use_vol_surface`` is on. NOT serialized — QL handles
+    # are C++ objects, opaque to Pydantic, and only meaningful inside the
+    # process that built them. ``exclude=True`` keeps it out of model_dump()
+    # / SSE payloads / persistence; the type is ``Any`` so Pydantic does not
+    # attempt any validation or coercion.
+    vol_handle: Optional[Any] = Field(default=None, exclude=True, repr=False)
 
     # User input (form path) and / or NL blob (demo path).
     intake_form: Optional[dict[str, Any]] = None

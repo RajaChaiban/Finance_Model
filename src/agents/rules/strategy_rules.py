@@ -125,6 +125,20 @@ RULES: tuple[RuleRow, ...] = (
         ),
     ),
     RuleRow(
+        view="mildly_bullish",
+        horizon_band="mid",
+        budget_band="low",
+        vol_regime="normal",
+        barrier_appetite="no",
+        structures=(StructureKind.CALL_SPREAD, StructureKind.LONG_CALL, StructureKind.RISK_REVERSAL),
+        rationale=(
+            "Mild bullish bias on a tight budget: a debit call spread caps the cost "
+            "and gives bounded upside; outright long call is the cleaner expression "
+            "if budget allows; risk reversal monetises the put wing for a more leveraged "
+            "directional view (assignment risk on the short put)."
+        ),
+    ),
+    RuleRow(
         view="neutral",
         horizon_band="short",
         budget_band="credit",
@@ -275,6 +289,12 @@ _CALL_OTM_PCT_DEFAULT = 0.08     # 8% OTM short call (collars / covered calls)
 _KO_BARRIER_PCT_DEFAULT = 0.20   # 20% below spot for down-and-out put
 _PUT_SPREAD_WIDTH_DEFAULT = 0.10 # 10% of spot wide
 _KI_BARRIER_PCT_DEFAULT = 0.15   # 15% below spot for KI activation
+
+# Bullish (call-side) defaults — mirror the put-side conventions.
+_CALL_LONG_OTM_PCT_DEFAULT = 0.05    # 5% OTM long call leg (call spread)
+_CALL_SPREAD_WIDTH_DEFAULT = 0.10    # 10% of spot wide (parallel to put spread)
+_KO_CALL_BARRIER_PCT_DEFAULT = 0.20  # 20% above spot for up-and-out call
+_KI_CALL_BARRIER_PCT_DEFAULT = 0.15  # 15% above spot for up-and-in call activation
 
 
 def _round_strike(x: float) -> float:
@@ -497,14 +517,102 @@ def _build_put_spread_collar(obj: ClientObjective, regime: MarketRegime) -> Cand
     )
 
 
+def _build_call_spread(obj: ClientObjective, regime: MarketRegime, *, debit: bool = True) -> Candidate:
+    """Bullish call spread: long lower-strike call + short higher-strike call.
+
+    Mirrors `_build_put_spread`: long leg at `_CALL_LONG_OTM_PCT_DEFAULT` OTM,
+    short leg another `_CALL_SPREAD_WIDTH_DEFAULT` of spot above. `debit=True`
+    is the standard bullish debit call spread; `debit=False` flips to a credit
+    bear-call spread (kept for symmetry with put spread).
+    """
+    K_long = _round_strike(regime.spot * (1 + _CALL_LONG_OTM_PCT_DEFAULT))
+    K_short = _round_strike(K_long + regime.spot * _CALL_SPREAD_WIDTH_DEFAULT)
+    long_qty = +1.0 if debit else -1.0
+    short_qty = -1.0 if debit else +1.0
+    legs = [
+        Leg(option_type="european_call", strike=K_long, expiry_days=obj.horizon_days,
+            quantity=long_qty, role="long_call_directional"),
+        Leg(option_type="european_call", strike=K_short, expiry_days=obj.horizon_days,
+            quantity=short_qty, role="short_call_finance"),
+    ]
+    return Candidate(
+        kind=StructureKind.CALL_SPREAD,
+        name=f"Call Spread {K_long:.0f}/{K_short:.0f}",
+        legs=legs,
+        rationale=(
+            f"Bullish exposure between {K_long:.0f} and {K_short:.0f}; upside above "
+            f"{K_short:.0f} is given up. Materially cheaper than an outright long call "
+            "and the natural cost-controlled bullish expression."
+        ),
+        notional_usd=obj.notional_usd,
+        hedging_cost_premium_bps=3.0,
+    )
+
+
+def _build_ko_call(obj: ClientObjective, regime: MarketRegime) -> Candidate:
+    """Long up-and-out call: cheap bullish exposure that knocks out on a melt-up."""
+    K = _round_strike(regime.spot * (1 + _CALL_LONG_OTM_PCT_DEFAULT))
+    B = _round_strike(regime.spot * (1 + _KO_CALL_BARRIER_PCT_DEFAULT))
+    leg = Leg(
+        option_type="knockout_call",
+        strike=K,
+        expiry_days=obj.horizon_days,
+        quantity=+1.0,
+        barrier_level=B,
+        barrier_monitoring="continuous",
+        role="long_ko_call",
+    )
+    return Candidate(
+        kind=StructureKind.KO_CALL,
+        name=f"KO Call K={K:.0f} B={B:.0f}",
+        legs=[leg],
+        rationale=(
+            f"Up-and-out call: bullish exposure from {K:.0f} up to {B:.0f}, knocks out above. "
+            "Materially cheaper than a vanilla long call but the client gives up the "
+            "right tail if spot pierces the barrier."
+        ),
+        notional_usd=obj.notional_usd,
+        hedging_cost_premium_bps=8.0,  # barriers are harder to hedge — bake it in
+    )
+
+
+def _build_ki_call(obj: ClientObjective, regime: MarketRegime) -> Candidate:
+    """Long up-and-in call: only activates if spot rallies through the barrier."""
+    K = _round_strike(regime.spot * (1 + _CALL_LONG_OTM_PCT_DEFAULT))
+    B = _round_strike(regime.spot * (1 + _KI_CALL_BARRIER_PCT_DEFAULT))
+    leg = Leg(
+        option_type="knockin_call",
+        strike=K,
+        expiry_days=obj.horizon_days,
+        quantity=+1.0,
+        barrier_level=B,
+        barrier_monitoring="continuous",
+        role="long_ki_call",
+    )
+    return Candidate(
+        kind=StructureKind.KI_CALL,
+        name=f"KI Call K={K:.0f} B={B:.0f}",
+        legs=[leg],
+        rationale=(
+            f"Up-and-in call: only activates if spot trades through {B:.0f}. "
+            "Cheap bullish kicker for a melt-up scenario, useless against a slow grind."
+        ),
+        notional_usd=obj.notional_usd,
+        hedging_cost_premium_bps=6.0,
+    )
+
+
 _FACTORIES: dict[StructureKind, Callable[[ClientObjective, MarketRegime], Candidate]] = {
     StructureKind.LONG_PUT: _build_long_put,
     StructureKind.LONG_CALL: _build_long_call,
     StructureKind.PUT_SPREAD: _build_put_spread,
+    StructureKind.CALL_SPREAD: _build_call_spread,
     StructureKind.COLLAR: lambda obj, reg: _build_collar(obj, reg, zero_cost=False),
     StructureKind.ZERO_COST_COLLAR: lambda obj, reg: _build_collar(obj, reg, zero_cost=True),
     StructureKind.KO_PUT: _build_ko_put,
     StructureKind.KI_PUT: _build_ki_put,
+    StructureKind.KO_CALL: _build_ko_call,
+    StructureKind.KI_CALL: _build_ki_call,
     StructureKind.COVERED_CALL: _build_covered_call,
     StructureKind.RISK_REVERSAL: _build_risk_reversal,
     StructureKind.PUT_SPREAD_COLLAR: _build_put_spread_collar,
