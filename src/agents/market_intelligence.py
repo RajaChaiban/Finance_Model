@@ -570,6 +570,62 @@ class MarketIntelligence:
         logger.info(f"Seeded {len(docs)} FRED macro documents into MI corpus")
         return len(docs)
 
+    def seed_from_cboe(self) -> int:
+        """Pull VIX history (and optional term structure) from CBOE and seed MI.
+
+        Wraps :func:`src.data.cboe_ingester.fetch_cboe_documents`. Idempotent
+        across calls on the same trading day because each doc id is keyed off
+        the observation date. Not auto-called on startup — the host app must
+        invoke this explicitly so a slow CBOE fetch can't block boot.
+
+        Returns:
+            Number of documents seeded. ``0`` when the CDN is unreachable or
+            the CSV came back empty.
+        """
+        from src.data.cboe_ingester import fetch_cboe_documents
+
+        docs = fetch_cboe_documents()
+        if not docs:
+            return 0
+        self.seed_from_dicts(docs)
+        logger.info(f"Seeded {len(docs)} CBOE VIX docs into MI corpus")
+        return len(docs)
+
+    def seed_from_edgar(
+        self,
+        user_agent: Optional[str] = None,
+        days_back: int = 90,
+    ) -> int:
+        """Pull recent structured-note filings from SEC EDGAR and seed them.
+
+        Wraps :func:`src.data.edgar_ingester.fetch_edgar_filings`. Not auto-
+        called from ``get_market_intelligence`` startup — a 90-day fetch
+        is too slow to block app boot. Callers should invoke this from
+        a seed script.
+
+        Args:
+            user_agent: SEC-required ``"<name> <email>"`` string. Falls
+                back to ``EDGAR_USER_AGENT`` env var, then to a safe
+                default identifying VolDesk.
+            days_back: Trailing window in days (default 90).
+
+        Returns:
+            Number of documents seeded. ``0`` when EDGAR returned nothing.
+        """
+        from src.data.edgar_ingester import fetch_edgar_filings
+
+        ua = user_agent or os.environ.get(
+            "EDGAR_USER_AGENT", "VolDesk MarketIntel admin@example.com"
+        )
+        docs = fetch_edgar_filings(user_agent=ua, days_back=days_back)
+        if not docs:
+            return 0
+        self.seed_from_dicts(docs)
+        logger.info(
+            f"Seeded {len(docs)} EDGAR structured-note filings into MI corpus"
+        )
+        return len(docs)
+
     def count(self) -> int:
         return self.vector_store.count()
 
