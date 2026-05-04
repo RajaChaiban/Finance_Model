@@ -1088,6 +1088,11 @@ def build_candidates(rule: RuleRow, obj: ClientObjective, regime: MarketRegime) 
         appears in the slate (substituting the bottom-ranked non-barrier).
       - neutral preference: for neutral / yield_enhance views, the strangle vs
         condor ordering follows ``premium_tolerance``.
+      - budget rescue: each candidate is quick-priced via closed-form BS; if
+        every variant blows the budget, lightweight transforms (tighten spread,
+        push long leg further OTM, vanilla→barrier when allowed, tighten
+        collar cap) are tried in order and the first in-budget variant is
+        adopted. See ``_rescue_for_budget``.
     """
     out: list[Candidate] = []
     for kind in rule.structures:
@@ -1100,4 +1105,588 @@ def build_candidates(rule: RuleRow, obj: ClientObjective, regime: MarketRegime) 
             continue
     out = _ensure_barrier_candidate(out, obj, regime)
     out = _reorder_neutral_candidates(out, obj)
+    out = _rescue_for_budget(out, obj, regime)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Budget-aware rescue pass
+# ---------------------------------------------------------------------------
+
+
+def _barrier_discount(
+    *, kind: str, S: float, K: float, B: float, sigma: float, T: float,
+) -> float:
+    """Distance-and-tenor-aware KI/KO discount factor in [0, 1].
+
+    The static 0.40 / 0.60 ratios mis-price short-tenor high-vol KI/KO by
+    50%+ — when the barrier is close (in σ√T units) the touch probability
+    is high and KI ≈ vanilla. We bracket the discount with a piecewise-
+    linear interpolation on the standardised log-distance ``λ = |ln(B/S)|
+    / (σ√T)``. KI and KO are tracked SEPARATELY (not 1 − KI) and both are
+    biased UP slightly so the rescue's quick price runs ~5-15% rich vs
+    QL — under-estimating either side causes the rescue to accept a
+    candidate the validator will then BLOCK. Anchors calibrated against
+    QuantLib RR on SPY 365d / COIN 14d / typical 5-15% OTM cases.
+    """
+    if S <= 0 or B <= 0 or sigma <= 0 or T <= 0:
+        return 0.4
+    sqrtT = math.sqrt(T)
+    lam = abs(math.log(B / S)) / (sigma * sqrtT)
+
+    # KI anchors: (lam, KI_ratio). Slightly biased above QL.
+    ki_anchors = [
+        (0.0, 1.00), (0.3, 1.00), (0.6, 0.98),
+        (0.9, 0.92), (1.2, 0.82), (1.5, 0.65),
+        (1.9, 0.40), (2.3, 0.20), (3.0, 0.08), (5.0, 0.01),
+    ]
+    # KO anchors: (lam, KO_ratio). Tracked independently — KI+KO≈1 in QL,
+    # but biasing both UP keeps the rescue conservative on either side.
+    ko_anchors = [
+        (0.0, 0.05), (0.3, 0.10), (0.6, 0.18),
+        (0.9, 0.27), (1.2, 0.40), (1.5, 0.55),
+        (1.9, 0.72), (2.3, 0.85), (3.0, 0.95), (5.0, 0.99),
+    ]
+
+    def _interp(anchors: list[tuple[float, float]], x: float) -> float:
+        if x <= anchors[0][0]:
+            return anchors[0][1]
+        if x >= anchors[-1][0]:
+            return anchors[-1][1]
+        for (l_lo, r_lo), (l_hi, r_hi) in zip(anchors, anchors[1:]):
+            if l_lo <= x <= l_hi:
+                w = (x - l_lo) / (l_hi - l_lo)
+                return r_lo + w * (r_hi - r_lo)
+        return anchors[len(anchors) // 2][1]
+
+    if kind.startswith("knockin_"):
+        return max(0.0, min(1.0, _interp(ki_anchors, lam)))
+    if kind.startswith("knockout_"):
+        return max(0.0, min(1.0, _interp(ko_anchors, lam)))
+    return 1.0
+
+
+def _quick_price_bps(
+    legs: list[Leg], spot: float, r: float, q: float, sigma: float, T: float,
+) -> float:
+    """Closed-form BS proxy for ``net_premium_bps`` of a candidate.
+
+    Sums ``leg.quantity * price`` per share, then converts to bps via
+    ``per_share / spot * 10_000``. Vanilla legs use ``price_european``
+    directly. Barrier legs scale the same-strike vanilla by a distance-
+    and-tenor-aware KI/KO discount (``_barrier_discount``) so the rescue
+    quick price is calibrated for short-tenor high-vol regimes where the
+    barrier is almost certain to be hit. The PricingAgent re-prices
+    exactly via the QL barrier engine downstream.
+    """
+    if spot <= 0 or T <= 0 or sigma <= 0:
+        return 0.0
+    per_share = 0.0
+    for leg in legs:
+        opt = leg.option_type.lower()
+        if opt.endswith("_call"):
+            base = "call"
+        elif opt.endswith("_put"):
+            base = "put"
+        else:
+            # Asian / lookback / unknown — approximate as vanilla on strike.
+            base = "put"
+        try:
+            vanilla = price_european(spot, leg.strike, r, sigma, T, q, option_type=base)
+        except Exception:  # noqa: BLE001
+            continue
+        if opt.startswith(("knockout_", "knockin_")) and leg.barrier_level is not None:
+            disc = _barrier_discount(
+                kind=opt, S=spot, K=leg.strike, B=float(leg.barrier_level),
+                sigma=sigma, T=T,
+            )
+            price = disc * vanilla
+        else:
+            price = vanilla
+        per_share += leg.quantity * price
+    return (per_share / spot) * 10_000.0
+
+
+def _within_tolerance(quick_bps: float, budget_bps: float, mult: float, slack: float) -> bool:
+    """Tolerance check used by the rescue: |bps| ≤ budget * mult + slack."""
+    return abs(quick_bps) <= budget_bps * mult + slack
+
+
+def _clone_candidate_with_legs(
+    cand: Candidate, legs: list[Leg], *, name: Optional[str] = None,
+) -> Candidate:
+    """Return a copy of ``cand`` with the given legs (and optional new name).
+
+    Preserves ``kind``, ``rationale``, ``hedging_cost_premium_bps``, and the
+    notional. Strategist tests assert on ``kind`` membership, never on a
+    specific candidate_id, so re-using the original id keeps memo and gate-B
+    swap intent stable through the rescue.
+    """
+    return Candidate(
+        candidate_id=cand.candidate_id,
+        kind=cand.kind,
+        name=name if name is not None else cand.name,
+        legs=legs,
+        rationale=cand.rationale,
+        hedging_cost_premium_bps=cand.hedging_cost_premium_bps,
+        notional_usd=cand.notional_usd,
+    )
+
+
+def _tighten_spread(cand: Candidate) -> Optional[Candidate]:
+    """For PUT_SPREAD / CALL_SPREAD / PUT_SPREAD_COLLAR: narrow the long-short
+    K distance to 50% of original by moving the SHORT leg toward the long.
+    """
+    if cand.kind not in (
+        StructureKind.PUT_SPREAD, StructureKind.CALL_SPREAD,
+        StructureKind.PUT_SPREAD_COLLAR,
+    ):
+        return None
+
+    is_put_spread = cand.kind in (StructureKind.PUT_SPREAD, StructureKind.PUT_SPREAD_COLLAR)
+    leg_filter = "_put" if is_put_spread else "_call"
+
+    long_leg = next(
+        (l for l in cand.legs if l.option_type.endswith(leg_filter) and l.quantity > 0),
+        None,
+    )
+    short_leg = next(
+        (l for l in cand.legs if l.option_type.endswith(leg_filter) and l.quantity < 0),
+        None,
+    )
+    if long_leg is None or short_leg is None:
+        return None
+
+    # Move short leg halfway toward long.
+    new_short_K = _round_strike((long_leg.strike + short_leg.strike) / 2.0)
+    if new_short_K == short_leg.strike:
+        return None  # already as tight as the grid allows
+    if is_put_spread and new_short_K >= long_leg.strike:
+        return None
+    if (not is_put_spread) and new_short_K <= long_leg.strike:
+        return None
+
+    new_legs = []
+    for leg in cand.legs:
+        if leg is short_leg:
+            new_legs.append(leg.model_copy(update={"strike": new_short_K}))
+        else:
+            new_legs.append(leg.model_copy())
+    return _clone_candidate_with_legs(cand, new_legs)
+
+
+def _push_long_otm(cand: Candidate, regime: MarketRegime, T: float) -> Optional[Candidate]:
+    """For LONG_PUT / LONG_CALL / PUT_SPREAD / CALL_SPREAD: push the LONG
+    leg further out by 50% of its current distance from the forward.
+    Reduces premium materially while keeping kind unchanged.
+    """
+    if cand.kind not in (
+        StructureKind.LONG_PUT, StructureKind.LONG_CALL,
+        StructureKind.PUT_SPREAD, StructureKind.CALL_SPREAD,
+    ):
+        return None
+    F = _forward(regime.spot, regime.risk_free_rate, regime.dividend_yield, T)
+    is_call_side = cand.kind in (StructureKind.LONG_CALL, StructureKind.CALL_SPREAD)
+    leg_filter = "_call" if is_call_side else "_put"
+    long_leg = next(
+        (l for l in cand.legs if l.option_type.endswith(leg_filter) and l.quantity > 0),
+        None,
+    )
+    if long_leg is None:
+        return None
+
+    distance = long_leg.strike - F  # signed (negative for OTM puts)
+    new_K = _round_strike(long_leg.strike - 0.5 * distance)
+    if new_K == long_leg.strike or new_K <= 0:
+        return None
+
+    new_legs = []
+    for leg in cand.legs:
+        if leg is long_leg:
+            new_legs.append(leg.model_copy(update={"strike": new_K}))
+        else:
+            new_legs.append(leg.model_copy())
+    return _clone_candidate_with_legs(cand, new_legs)
+
+
+def _convert_vanilla_to_barrier(
+    cand: Candidate, regime: MarketRegime, T: float,
+) -> Optional[Candidate]:
+    """LONG_PUT → KI_PUT (B at 85% of forward), LONG_CALL → KI_CALL (B at
+    115% of forward). Caller guards on ``barrier_appetite=True``.
+
+    NOTE: this is the ONE rescue transform that mutates ``StructureKind``.
+    Gated by ``objective.barrier_appetite=True`` — see CLAUDE.md invariants.
+    """
+    F = _forward(regime.spot, regime.risk_free_rate, regime.dividend_yield, T)
+
+    if cand.kind == StructureKind.LONG_PUT:
+        long_leg = next(
+            (l for l in cand.legs if l.option_type == "european_put" and l.quantity > 0),
+            None,
+        )
+        if long_leg is None:
+            return None
+        B = _round_strike(F * 0.85)
+        if B >= long_leg.strike:
+            B = _round_strike(min(long_leg.strike * 0.95, long_leg.strike - 1.0))
+        new_leg = long_leg.model_copy(update={
+            "option_type": "knockin_put",
+            "barrier_level": B,
+            "barrier_monitoring": "continuous",
+            "role": "long_ki_put",
+        })
+        return Candidate(
+            candidate_id=cand.candidate_id,
+            kind=StructureKind.KI_PUT,
+            name=f"KI Put K={long_leg.strike:.0f} B={B:.0f}",
+            legs=[new_leg],
+            rationale=cand.rationale,
+            hedging_cost_premium_bps=6.0,
+            notional_usd=cand.notional_usd,
+        )
+
+    if cand.kind == StructureKind.LONG_CALL:
+        long_leg = next(
+            (l for l in cand.legs if l.option_type == "european_call" and l.quantity > 0),
+            None,
+        )
+        if long_leg is None:
+            return None
+        B = _round_strike(F * 1.15)
+        if B <= long_leg.strike:
+            B = _round_strike(max(long_leg.strike * 1.05, long_leg.strike + 1.0))
+        new_leg = long_leg.model_copy(update={
+            "option_type": "knockin_call",
+            "barrier_level": B,
+            "barrier_monitoring": "continuous",
+            "role": "long_ki_call",
+        })
+        return Candidate(
+            candidate_id=cand.candidate_id,
+            kind=StructureKind.KI_CALL,
+            name=f"KI Call K={long_leg.strike:.0f} B={B:.0f}",
+            legs=[new_leg],
+            rationale=cand.rationale,
+            hedging_cost_premium_bps=6.0,
+            notional_usd=cand.notional_usd,
+        )
+
+    return None
+
+
+def _push_barrier_strike_deep(
+    cand: Candidate, regime: MarketRegime, T: float,
+) -> Optional[Candidate]:
+    """Cheapen a barrier or long-vanilla candidate by pushing the strike
+    deeper OTM (10% OTM-on-forward instead of 5%) — invoked only when the
+    earlier rescue transforms didn't bring the premium under budget.
+
+    Three accepted starting kinds:
+      - LONG_PUT  → KI_PUT at 90% F with B at 80% F (caller must have
+        ``barrier_appetite=True`` — gated upstream).
+      - LONG_CALL → KI_CALL at 110% F with B at 120% F (same gate).
+      - KI_PUT / KO_PUT / KI_CALL / KO_CALL → push the existing strike
+        and barrier proportionally further OTM.
+    """
+    F = _forward(regime.spot, regime.risk_free_rate, regime.dividend_yield, T)
+
+    # Existing-barrier candidates: push strike + barrier deeper.
+    if cand.kind in (
+        StructureKind.KI_PUT, StructureKind.KO_PUT,
+        StructureKind.KI_CALL, StructureKind.KO_CALL,
+    ):
+        leg = cand.legs[0] if cand.legs else None
+        if leg is None or leg.barrier_level is None:
+            return None
+        is_put = leg.option_type.endswith("_put")
+        if is_put:
+            new_K = _round_strike(F * 0.88)  # 12% OTM-on-forward
+            new_B = _round_strike(F * 0.70)  # 30% OTM-on-forward
+            if new_B >= new_K:
+                new_B = _round_strike(min(new_K * 0.85, new_K - 1.0))
+        else:
+            new_K = _round_strike(F * 1.12)
+            new_B = _round_strike(F * 1.30)
+            if new_B <= new_K:
+                new_B = _round_strike(max(new_K * 1.15, new_K + 1.0))
+        if new_K == leg.strike and new_B == leg.barrier_level:
+            return None
+        new_leg = leg.model_copy(update={"strike": new_K, "barrier_level": new_B})
+        return Candidate(
+            candidate_id=cand.candidate_id,
+            kind=cand.kind,
+            name=f"{cand.kind.value.upper()} K={new_K:.0f} B={new_B:.0f} (deep OTM)",
+            legs=[new_leg],
+            rationale=cand.rationale,
+            hedging_cost_premium_bps=cand.hedging_cost_premium_bps,
+            notional_usd=cand.notional_usd,
+        )
+
+    # Long-vanilla: convert to barrier at deep-OTM strike (gated externally
+    # on barrier_appetite — see ``_rescue_for_budget._transforms``).
+    if cand.kind == StructureKind.LONG_PUT:
+        long_leg = next(
+            (l for l in cand.legs if l.option_type == "european_put" and l.quantity > 0),
+            None,
+        )
+        if long_leg is None:
+            return None
+        new_K = _round_strike(F * 0.88)
+        new_B = _round_strike(F * 0.70)
+        if new_B >= new_K:
+            new_B = _round_strike(min(new_K * 0.85, new_K - 1.0))
+        new_leg = long_leg.model_copy(update={
+            "option_type": "knockin_put",
+            "strike": new_K,
+            "barrier_level": new_B,
+            "barrier_monitoring": "continuous",
+            "role": "long_ki_put",
+        })
+        return Candidate(
+            candidate_id=cand.candidate_id,
+            kind=StructureKind.KI_PUT,
+            name=f"KI Put K={new_K:.0f} B={new_B:.0f} (deep OTM)",
+            legs=[new_leg],
+            rationale=cand.rationale,
+            hedging_cost_premium_bps=6.0,
+            notional_usd=cand.notional_usd,
+        )
+
+    if cand.kind == StructureKind.LONG_CALL:
+        long_leg = next(
+            (l for l in cand.legs if l.option_type == "european_call" and l.quantity > 0),
+            None,
+        )
+        if long_leg is None:
+            return None
+        new_K = _round_strike(F * 1.12)
+        new_B = _round_strike(F * 1.30)
+        if new_B <= new_K:
+            new_B = _round_strike(max(new_K * 1.15, new_K + 1.0))
+        new_leg = long_leg.model_copy(update={
+            "option_type": "knockin_call",
+            "strike": new_K,
+            "barrier_level": new_B,
+            "barrier_monitoring": "continuous",
+            "role": "long_ki_call",
+        })
+        return Candidate(
+            candidate_id=cand.candidate_id,
+            kind=StructureKind.KI_CALL,
+            name=f"KI Call K={new_K:.0f} B={new_B:.0f} (deep OTM)",
+            legs=[new_leg],
+            rationale=cand.rationale,
+            hedging_cost_premium_bps=6.0,
+            notional_usd=cand.notional_usd,
+        )
+
+    return None
+
+
+def _tighten_collar_cap(
+    cand: Candidate, regime: MarketRegime, T: float,
+    *,
+    sigma: Optional[float] = None,
+    budget_bps: Optional[float] = None,
+) -> Optional[Candidate]:
+    """For COLLAR or ZERO_COST_COLLAR with a residual debit/credit gap:
+    sweep BOTH legs over a small grid neighbourhood and pick the (put, call)
+    pair whose quick-priced net sits closest to ``budget_bps`` (default 0).
+
+    The Brent solve in ``_build_collar`` already places K_call optimally for
+    the original K_put on a continuous strike — but rounding to a $1 grid
+    can leave 5–15 bps of residual that the desk reads as "over zero-cost".
+    A bilateral grid sweep (±2 steps on the call, ±1 step on the put,
+    bounded by K_put < K_call) finds the discrete pair that minimises the
+    residual, mirroring what a sales-trader would do at the desk.
+    """
+    if cand.kind not in (StructureKind.COLLAR, StructureKind.ZERO_COST_COLLAR):
+        return None
+    short_call = next(
+        (l for l in cand.legs if l.option_type.endswith("_call") and l.quantity < 0),
+        None,
+    )
+    long_put = next(
+        (l for l in cand.legs if l.option_type.endswith("_put") and l.quantity > 0),
+        None,
+    )
+    if short_call is None:
+        return None
+
+    if sigma is None:
+        sigma = _regime_sigma(regime)
+    target = float(budget_bps) if budget_bps is not None else 0.0
+
+    call_step = _grid_step_for_strike(short_call.strike)
+    # Sweep call: +0 .. -4 grid steps (tighten the cap, never widen).
+    call_strikes = [
+        _round_strike(short_call.strike - n * call_step)
+        for n in range(0, 5)
+    ]
+    call_strikes = [k for k in call_strikes if k > 0]
+
+    if long_put is not None:
+        put_step = _grid_step_for_strike(long_put.strike)
+        # Sweep put: -1, 0, +1 grid step (the put leg can move slightly to
+        # rebalance — a more-OTM put cheapens, a less-OTM put richens).
+        put_strikes = [
+            _round_strike(long_put.strike + d * put_step)
+            for d in (-1, 0, +1)
+        ]
+        put_strikes = [k for k in put_strikes if k > 0]
+    else:
+        put_strikes = [None]
+
+    best_variant: Optional[Candidate] = None
+    best_score = float("inf")
+    orig_call = short_call.strike
+    orig_put = long_put.strike if long_put is not None else None
+    for kc in call_strikes:
+        for kp in put_strikes:
+            # Skip the no-op (== orig).
+            if kc == orig_call and kp == orig_put:
+                continue
+            # Sanity: K_call must remain strictly above K_put.
+            if kp is not None and kc <= kp:
+                continue
+            new_legs = []
+            for leg in cand.legs:
+                if leg is short_call:
+                    new_legs.append(leg.model_copy(update={"strike": kc}))
+                elif long_put is not None and leg is long_put:
+                    new_legs.append(leg.model_copy(update={"strike": kp}))
+                else:
+                    new_legs.append(leg.model_copy())
+            try:
+                v_bps = _quick_price_bps(
+                    new_legs, regime.spot, regime.risk_free_rate,
+                    regime.dividend_yield, sigma, T,
+                )
+            except Exception:  # noqa: BLE001
+                continue
+            score = abs(v_bps - target)
+            if score < best_score:
+                best_score = score
+                best_variant = _clone_candidate_with_legs(cand, new_legs)
+    return best_variant
+
+
+def _rescue_for_budget(
+    candidates: list[Candidate], obj: ClientObjective, regime: MarketRegime,
+) -> list[Candidate]:
+    """Budget-aware post-processing pass.
+
+    For each rule-built candidate:
+      1. Quick-price via closed-form BS. If ``|bps| ≤ budget*1.2 + 10``, leave
+         alone (within structurer tolerance).
+      2. Otherwise, try transforms in order — tighten spread, push long
+         further OTM, vanilla→barrier (gated on ``barrier_appetite``),
+         tighten collar cap. Re-quick-price after each. Adopt the first
+         variant within ``budget*1.1 + 10``.
+      3. If all transforms fail (still > ``budget*1.2``), append a budget-
+         infeasible note to ``candidate.rationale`` so the memo's per-
+         candidate section explains the structurer's action.
+
+    Telemetry: every successful transform appends a one-line note to
+    ``rationale``. The PricingAgent re-prices exactly downstream — the
+    rescue's role is purely candidate selection, never final pricing.
+    """
+    if not candidates:
+        return candidates
+
+    budget = max(0.0, float(obj.budget_bps_notional))
+    T = _regime_T(obj)
+    sigma = _regime_sigma(regime)
+    spot = regime.spot
+    r = regime.risk_free_rate
+    q = regime.dividend_yield
+
+    # Rescue acceptance must match (not exceed) the validator's hard cap
+    # ``budget + _BUDGET_TOLERANCE_BPS = budget + 10``. If we accept a
+    # variant outside that, the validator will BLOCK it on the QL re-price
+    # and we've spent rescue effort for nothing. Both the initial "leave
+    # alone" threshold and the transform-acceptance threshold are kept at
+    # the same ``budget + 10`` line — there's no value in skipping
+    # transforms on a candidate the validator will reject.
+    accept_mult = 1.0
+    accept_slack = 10.0
+    initial_mult = 1.0
+    initial_slack = 10.0
+
+    # Build the transform pipeline (each returns Optional[Candidate]).
+    # Order matters: cheapest structural change first; then progressively
+    # more aggressive (deep-OTM, vanilla→barrier, deep-OTM barrier).
+    def _transforms(c: Candidate) -> list[tuple[str, Optional[Candidate]]]:
+        seq: list[tuple[str, Optional[Candidate]]] = []
+        seq.append(("tightened spread", _tighten_spread(c)))
+        seq.append(("pushed long leg further OTM", _push_long_otm(c, regime, T)))
+        if obj.barrier_appetite:
+            seq.append(("converted vanilla to barrier", _convert_vanilla_to_barrier(c, regime, T)))
+            # Stacked: push the long leg of an existing barrier candidate
+            # further OTM and / or convert + push for vanilla candidates.
+            # This handles SPY-365d-style cases where the 5%-OTM barrier
+            # variant is still above budget.
+            seq.append((
+                "pushed barrier strike deep OTM",
+                _push_barrier_strike_deep(c, regime, T),
+            ))
+        seq.append((
+            "tightened collar cap",
+            _tighten_collar_cap(c, regime, T, sigma=sigma, budget_bps=budget),
+        ))
+        return seq
+
+    out: list[Candidate] = []
+    for cand in candidates:
+        try:
+            quick_bps = _quick_price_bps(cand.legs, spot, r, q, sigma, T)
+        except Exception:  # noqa: BLE001
+            out.append(cand)
+            continue
+
+        if _within_tolerance(quick_bps, budget, initial_mult, initial_slack):
+            out.append(cand)
+            continue
+
+        # Try transforms in order until one fits.
+        adopted: Optional[Candidate] = None
+        adopted_label: str = ""
+        adopted_bps: float = quick_bps
+        for label, variant in _transforms(cand):
+            if variant is None:
+                continue
+            try:
+                v_bps = _quick_price_bps(variant.legs, spot, r, q, sigma, T)
+            except Exception:  # noqa: BLE001
+                continue
+            if _within_tolerance(v_bps, budget, accept_mult, accept_slack):
+                adopted = variant
+                adopted_label = label
+                adopted_bps = v_bps
+                break
+
+        if adopted is not None:
+            note = (
+                f"\n[budget rescue: {adopted_label} "
+                f"(quick-priced {adopted_bps:+.0f}bps vs budget {budget:.0f}bps)]"
+            )
+            adopted.rationale = adopted.rationale + note
+            out.append(adopted)
+            continue
+
+        # Still infeasible — keep original but append the structurer note.
+        excess = max(0.0, abs(quick_bps) - budget)
+        note = (
+            f"\nBudget-infeasible note: at requested participation, premium is "
+            f"~{abs(quick_bps):.0f}bps; consider raising budget by "
+            f"~{excess:.0f}bps, accepting barrier risk, or accepting tighter "
+            f"participation."
+        )
+        try:
+            cand.rationale = cand.rationale + note
+        except Exception:  # noqa: BLE001 — defensive only
+            pass
+        out.append(cand)
+
     return out

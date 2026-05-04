@@ -765,7 +765,7 @@ def main() -> int:
     # JSON dump for the report writer.
     out_dir = os.path.join(_REPO_ROOT, "research", "stress_test_2026_05_03")
     os.makedirs(out_dir, exist_ok=True)
-    out_filename = os.environ.get("STRESS_OUTPUT_FILE", "real_life_run_v2.json")
+    out_filename = os.environ.get("STRESS_OUTPUT_FILE", "real_life_run_v3.json")
     with open(os.path.join(out_dir, out_filename), "w", encoding="utf-8") as fh:
         # Strip non-serializable expected_kinds set if leaked anywhere; results
         # already only carry primitives.
