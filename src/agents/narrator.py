@@ -147,6 +147,53 @@ def _underlying_class(ticker: str) -> str:
     return _UNDERLYING_CLASS.get((ticker or "").upper(), "OTHER")
 
 
+def _event_caveats_for(obj) -> list[str]:
+    """Return the canonical event-keyed caveat strings for a ClientObjective.
+
+    Walks the EVENT_CAVEATS lookup in (view, class) -> ("*", class) ->
+    (view, "*") order, deduping while preserving order. This is the same
+    walk used inside `_caveats_for_memo` step 4 — extracted as a
+    free-function so the post-polish guard `_ensure_event_caveats` can
+    call it without re-implementing the walk.
+    """
+    if obj is None:
+        return []
+    view = (getattr(obj, "view", "") or "").strip()
+    u_class = _underlying_class(getattr(obj, "underlying", "") or "")
+    seen: set[str] = set()
+    out: list[str] = []
+    for key in (
+        (view, u_class),
+        ("*", u_class),
+        (view, "*"),
+    ):
+        for caveat in EVENT_CAVEATS.get(key, ()):
+            if caveat not in seen:
+                seen.add(caveat)
+                out.append(caveat)
+    return out
+
+
+def _validator_blocked(
+    pc: PricedCandidate, validator_report: Optional[ValidatorReport]
+) -> bool:
+    """True when the validator emitted any severity=BLOCK finding keyed to
+    this candidate's id.
+
+    Used as the highest-priority pre-filter in `_heuristic_pick` (Fix 1):
+    a candidate the validator categorically rejected must not be surfaced
+    as the recommendation. Findings with `candidate_id is None` are
+    cross-cutting (apply to the whole RFQ) and DO NOT count here — those
+    don't disqualify any one candidate, they just flag a global issue.
+    """
+    if validator_report is None:
+        return False
+    return any(
+        f.severity == Severity.BLOCK and f.candidate_id == pc.candidate.candidate_id
+        for f in validator_report.findings
+    )
+
+
 def _is_direction_compatible(pc: PricedCandidate, obj) -> bool:
     """Reject candidates whose net delta points the wrong way for the brief.
 
@@ -215,12 +262,9 @@ class NarratorAgent(BaseAgent):
 
         # Force-restore the deterministic skeleton's invariants. The LLM may
         # have rewritten prose, but the table and verdict are non-negotiable.
+        # Ordering: deterministic skeleton -> LLM polish -> verdict prefix ->
+        # MI footer -> event-keyed caveats -> title-template enforcement.
         memo.comparison_table_md = deterministic_table
-        # The polish step may have replaced our composed title with a leaked
-        # template string from a replay fixture (legacy "SPY Downside
-        # Protection (8m)" payload). Detect and override with our deterministic
-        # compose — the underlying/view/tenor are load-bearing for ops triage.
-        memo.title = self._enforce_title_template(memo.title, session.objective)
         memo.title = self._ensure_verdict_prefix(memo.title, verdict_line, on_title=True)
         memo.objective_restatement = self._ensure_verdict_prefix(
             memo.objective_restatement, verdict_line, on_title=False
@@ -229,6 +273,16 @@ class NarratorAgent(BaseAgent):
         memo.recommendation_md = self._ensure_mi_footer(
             memo.recommendation_md, deterministic_recommendation
         )
+        # Fix 3: re-append any canonical event-keyed caveats the LLM polish
+        # paraphrased away. Deterministic strings only — token-level audit
+        # signal that the lookup table actually fired for this objective.
+        self._ensure_event_caveats(memo, session.objective)
+        # Fix 2: title-template guard runs LAST so it can wrap a verdict line
+        # the prefix step inserted. Always re-derive from objective; the
+        # LLM polish step may have replaced our composed title with a leaked
+        # template string from a replay fixture (legacy "SPY Downside
+        # Protection (8m)" payload).
+        memo.title = self._enforce_title_template(memo.title, session.objective)
 
         # Stitch citations from upstream MI calls into the memo (no extra LLM).
         self._append_market_context_citations(memo, session)
@@ -241,40 +295,67 @@ class NarratorAgent(BaseAgent):
 
     @staticmethod
     def _enforce_title_template(text: str, obj) -> str:
-        """If the LLM polish replaced our composed title with a wrong-ticker
-        leak (the legacy "Internal RFQ - SPY Downside Protection (8m)" payload
-        from the demo_replay fixture is the canonical case), substitute our
-        deterministic compose for the leaked line. Preserves any VERDICT
-        prefix the polish step may have left in place.
+        """Always re-derive the "Internal RFQ - …" prefix from the
+        ClientObjective and replace any LLM-emitted variant.
+
+        Previous logic trusted any "Internal RFQ" line whose ticker substring
+        matched the objective ticker — that left SPY-keyed leaks like
+        ``Internal RFQ - SPY Downside Protection (8m)`` in place even when
+        the objective specified a different view or tenor (the canonical
+        ``(8m)`` smoking gun). The dynamic compose handles every (underlying,
+        view, horizon) tuple correctly.
+
+        We compare the "Internal RFQ - <UNDERLYING> <DIRECTION> (<TENOR>)"
+        prefix BYTE-FOR-BYTE; any line that contains "Internal RFQ" but
+        whose first segment doesn't match the canonical compose is rewritten.
+        The deterministic skeleton produces lines of the form
+        ``Internal RFQ - SPY Tail Hedge (18m) - SPY $500M 365d crash_hedge``
+        which DO match the canonical prefix and are kept verbatim
+        (suffix-and-all). LLM-polished leaks like
+        ``Internal RFQ - SPY Downside Protection (8m)`` do NOT match and
+        are replaced with the canonical compose. Preserves the VERDICT
+        prefix line that `_ensure_verdict_prefix` added (must run BEFORE
+        this guard).
         """
         if obj is None:
             return text or ""
         text = text or ""
-        composed = _compose_title(obj)
-        underlying_token = (obj.underlying or "").upper()
-        # Detect the leak: any line that starts with "Internal RFQ" but
-        # references a different ticker than the objective. Replace the
-        # offending line with the dynamically composed title.
+        expected = _compose_title(obj).strip()
+        if not text:
+            return expected
+
         out_lines: list[str] = []
         replaced = False
         for line in text.splitlines():
-            stripped = line.strip()
-            if stripped.lower().startswith("internal rfq"):
-                if underlying_token and underlying_token in stripped.upper():
-                    # Already mentions our ticker — keep it (LLM produced an
-                    # acceptable per-RFQ title).
+            if "Internal RFQ" in line:
+                # Byte-for-byte prefix match: strip any leading whitespace,
+                # compare the first len(expected) chars to the canonical
+                # compose. The deterministic skeleton's "<canonical> - SPY
+                # $X 365d crash_hedge" suffix passes; any LLM-coined
+                # variant ("SPY Downside Protection (8m)" on a 365d horizon)
+                # does not.
+                stripped = line.lstrip()
+                if stripped.startswith(expected):
                     out_lines.append(line)
-                else:
-                    out_lines.append(composed)
                     replaced = True
-                continue
-            out_lines.append(line)
-        if replaced or any(l.strip().lower().startswith("internal rfq") for l in out_lines):
-            return "\n".join(out_lines)
-        # No "Internal RFQ" line at all (legacy "3-Way Structuring Memo" or
-        # any other LLM-coined title) — prepend the composed title so ops
-        # triage always has a deterministic anchor.
-        return f"{composed}\n{text}".strip()
+                elif not replaced:
+                    out_lines.append(expected)
+                    replaced = True
+                # else: this is a duplicate / drift Internal RFQ line — drop.
+            else:
+                out_lines.append(line)
+
+        if not replaced:
+            # No "Internal RFQ" line at all (legacy "3-Way Structuring Memo"
+            # or any other LLM-coined title) — insert the composed title
+            # after any VERDICT prefix line so ops triage always has a
+            # deterministic anchor.
+            insert_at = 0
+            if out_lines and out_lines[0].lstrip().lower().startswith("verdict"):
+                insert_at = 1
+            out_lines.insert(insert_at, expected)
+
+        return "\n".join(out_lines).strip()
 
     @staticmethod
     def _ensure_verdict_prefix(text: str, verdict: str, *, on_title: bool) -> str:
@@ -325,6 +406,34 @@ class NarratorAgent(BaseAgent):
         return f"{polished.rstrip()}\n\n{clause}\n"
 
     @staticmethod
+    def _ensure_event_caveats(memo: MemoArtifact, obj) -> MemoArtifact:
+        """Re-append any canonical event-keyed caveat string the LLM polish
+        step paraphrased away.
+
+        Mirrors the `_ensure_mi_footer` pattern: we trust the LLM to polish
+        prose but enforce that load-bearing deterministic strings (e.g.
+        "IV crush risk: ATM IV typically drops 30-40% post-print …" for
+        an ``earnings_hedge`` view) survive polish verbatim, since downstream
+        token-level audit checks rely on them. The cap of 8 keeps the
+        section visually bounded; canonical caveats jump the queue ahead
+        of any LLM-coined extras only if we're already at the cap.
+        """
+        canonical = _event_caveats_for(obj)
+        if not canonical:
+            return memo
+        existing = list(memo.caveats or [])
+        existing_set = set(existing)
+        appended = False
+        for c in canonical:
+            if c not in existing_set:
+                existing.append(c)
+                existing_set.add(c)
+                appended = True
+        if appended:
+            memo.caveats = existing[:8]
+        return memo
+
+    @staticmethod
     def _merge_caveats(llm_caveats: list[str], deterministic: list[str]) -> list[str]:
         """Combine LLM-polished caveats with the deterministic structural
         ones, dedup, cap at 6. Deterministic items first because they are
@@ -349,7 +458,9 @@ class NarratorAgent(BaseAgent):
         scenarios_by_id = {s.candidate_id: s for s in session.scenarios}
         validator = session.validator
 
-        recommended_id, filter_caveat = self._heuristic_pick(priced, scenarios_by_id, obj)
+        recommended_id, filter_caveat = self._heuristic_pick(
+            priced, scenarios_by_id, obj, validator
+        )
         chosen = next(
             (p for p in priced if p.candidate.candidate_id == recommended_id),
             None,
@@ -709,29 +820,59 @@ class NarratorAgent(BaseAgent):
         priced: list[PricedCandidate],
         scenarios_by_id: dict[str, ScenarioReport],
         obj,
+        validator_report: Optional[ValidatorReport] = None,
     ) -> tuple[str, Optional[str]]:
         """Score each candidate; pick the highest. Crash P&L weighted positive,
         |premium| weighted negative, hedgeability flag is gating.
 
-        Pre-filters the candidate list on direction (Δ-sign vs view) and
-        capped-upside compatibility before scoring. If every candidate fails
-        both filters, falls back to the original list and returns a caveat
-        flag — the structurer needs to know the recommendation may not
-        match the brief.
+        Pre-filters the candidate list on:
+          1. Validator severity=BLOCK findings keyed to the candidate
+             (Fix 1: defer to the validator's hard-blockers — never recommend
+             a candidate the validator itself rejected).
+          2. Direction (Δ-sign vs view).
+          3. Capped-upside compatibility.
+        If every candidate fails ALL filters, falls back to the original
+        priced list and returns a caveat — the structurer needs to know
+        the recommendation may not match the brief.
 
         Returns (candidate_id, filter_caveat_or_None).
         """
-        eligible = [
+        # Step 1: drop validator-BLOCKed candidates first. This is the most
+        # consequential filter — a candidate the validator BLOCKed is
+        # categorically unfit for recommendation regardless of how well it
+        # scores on direction/cap/crash-P&L heuristics.
+        non_blocked = [
             pc for pc in priced
+            if not _validator_blocked(pc, validator_report)
+        ]
+
+        filter_caveat: Optional[str] = None
+        if not non_blocked:
+            # Every candidate has at least one BLOCK finding — fall back to
+            # the original list and emit a triage caveat. The structurer
+            # cannot proceed without re-running the strategist.
+            non_blocked = list(priced)
+            filter_caveat = (
+                "All candidates have validator BLOCKs — review brief and "
+                "re-run strategist."
+            )
+
+        # Step 2 + 3: direction + capped-upside compatibility.
+        eligible = [
+            pc for pc in non_blocked
             if _is_direction_compatible(pc, obj) and _capped_upside_compatible(pc, obj)
         ]
-        filter_caveat: Optional[str] = None
         if not eligible:
-            eligible = list(priced)
-            filter_caveat = (
-                "No candidate matches the client's direction / upside-cap "
-                "constraint - review strategist output before sending."
-            )
+            # No direction/cap-compatible candidate among the non-BLOCKed
+            # set. Fall back to the non-BLOCKed list (still better than
+            # a BLOCKed pick) and emit a caveat — but don't overwrite a
+            # pre-existing all-BLOCKed caveat.
+            eligible = non_blocked
+            if filter_caveat is None:
+                filter_caveat = (
+                    "No candidate matches the client's direction / upside-cap "
+                    "constraint - review strategist output before sending."
+                )
 
         def score(pc: PricedCandidate) -> float:
             sr = scenarios_by_id.get(pc.candidate.candidate_id)
@@ -941,18 +1082,11 @@ class NarratorAgent(BaseAgent):
                 )
 
         # 4. Event-keyed caveats from the (view, underlying_class) lookup.
-        # Walks the lookup in order: (view, class), ("*", class), (view, "*").
-        # Wildcard "*" means "any". A caveat appears at most once even if
-        # matched by multiple tiers (deduped below).
-        view = (obj.view or "").strip()
-        u_class = _underlying_class(obj.underlying)
-        for key in (
-            (view, u_class),
-            ("*", u_class),
-            (view, "*"),
-        ):
-            for caveat in EVENT_CAVEATS.get(key, ()):
-                out.append(caveat)
+        # Shared helper walks the lookup in order: (view, class),
+        # ("*", class), (view, "*"). Wildcard "*" means "any". A caveat
+        # appears at most once (helper dedupes; outer dedup handles overlap
+        # with prior steps).
+        out.extend(_event_caveats_for(obj))
 
         # Dedup, preserve order, cap.
         seen: set[str] = set()
