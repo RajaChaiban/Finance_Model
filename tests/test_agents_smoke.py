@@ -98,10 +98,25 @@ def test_smoke_flow_nl_to_memo(fixed_market_data):
     assert len(session.priced) == len(session.candidates)
     assert len(session.scenarios) == len(session.candidates)
     assert session.validator is not None
-    # No blockers expected from the rules-table outputs.
-    if session.validator.has_blockers:
-        blockers = [f for f in session.validator.findings if f.severity.value == "block"]
-        pytest.fail(f"Unexpected validator blockers: {blockers}")
+    # No structural blockers expected from the rules-table outputs.
+    # Phase-1A objective-fit invariants (budget_breach, delta_sign_vs_view,
+    # capped_upside_contradiction) may legitimately fire on the canned
+    # strategist replay payloads — the rules-table outputs are not guaranteed
+    # to land within the 100bps budget. The smoke test still fails fast on
+    # any structural invariant violation (strike order, barrier direction,
+    # engine feasibility, etc.).
+    _PHASE_1A_OBJECTIVE_FIT = {
+        "budget_breach",
+        "delta_sign_vs_view",
+        "capped_upside_contradiction",
+    }
+    structural_blockers = [
+        f
+        for f in session.validator.findings
+        if f.severity.value == "block" and f.name not in _PHASE_1A_OBJECTIVE_FIT
+    ]
+    if structural_blockers:
+        pytest.fail(f"Unexpected validator blockers: {structural_blockers}")
     assert session.memo is not None
     assert session.memo.title
     assert session.memo.comparison_table_md

@@ -12,6 +12,13 @@ Phase 1 invariants (block = stop the pipeline; warn = surface at Gate C):
   * Net premium > 0 for debit structures; ≈ 0 for ZCC                       [warn]
   * Greeks sign sanity (long put Δ ≤ 0, long call Δ ≥ 0, etc.)              [warn]
 
+Phase 1A objective-fit invariants (post-stress-test 2026-05-03):
+
+  * Net premium ≤ budget + 10bps tolerance                                  [block]
+  * Δ sign matches the client's view direction                              [block]
+  * No short call leg when capped_upside_ok=False                           [block]
+  * Neutral yield brief should not pick long-vol/short-theta structures     [warn]
+
 Phase 3 will broaden coverage and add LLM-written remediation messages. For
 now, a static remediation template per rule is enough.
 """
@@ -26,6 +33,7 @@ from typing import Any, Callable, Optional
 from .base import BaseAgent
 from .state import (
     Candidate,
+    ClientObjective,
     Leg,
     MarketRegime,
     PricedCandidate,
@@ -35,6 +43,34 @@ from .state import (
     ValidatorFinding,
     ValidatorReport,
 )
+
+# View → expected Δ sign. Maps the ClientObjective.view enum-values onto the
+# Greeks the recommended structure should carry. `neutral` is the only view
+# without a directional Δ constraint.
+_BULLISH_VIEWS = {"bullish", "mildly_bullish"}
+_BEARISH_VIEWS = {
+    "bearish",
+    "mildly_bearish",
+    "protect_gains",
+    "crash_hedge",
+    "earnings_hedge",
+}
+
+# Slop tolerance on Δ — anything inside |0.05| is treated as flat for sign
+# purposes. (Real bullish structures will have Δ well above 0.05; real bearish
+# ones well below -0.05.)
+_DELTA_SIGN_SLOP = 0.05
+
+# Budget breach tolerance: 10bps of headroom over the stated budget so a
+# 95bps recommended vs 90bps budget reads as "OK" but a 100bps+ breach blocks.
+_BUDGET_TOLERANCE_BPS = 10.0
+
+# Greeks tolerances for the neutral-yield consistency rule. A neutral
+# yield-collecting brief should not be net long-vol (vega>>0) or net
+# short-theta (theta<<0). The thresholds are deliberately conservative so we
+# only fire when the structure is clearly directional in vol/theta space.
+_NEUTRAL_YIELD_VEGA_MAX = 0.05
+_NEUTRAL_YIELD_THETA_MIN = -0.005
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +108,17 @@ class ValidatorAgent(BaseAgent):
         for pc in session.priced:
             self._validate_candidate(pc.candidate, pc, session.regime, report)
 
+        # Objective-fit invariants. These need session.objective and so live
+        # outside the per-candidate rule list. Each rule emits findings tagged
+        # with candidate_id so the Narrator's recommendation pass (which
+        # filters validator findings by candidate_id) sees them on whichever
+        # candidate(s) it ends up picking.
+        if session.objective is not None:
+            for pc in session.priced:
+                self._validate_against_objective(
+                    pc, session.objective, report
+                )
+
         # Market-comparable check (RAG). Adds WARN findings for outlier
         # structures so they surface to the user at Gate C, but never BLOCK —
         # absence of precedent isn't an arbitrage failure.
@@ -79,6 +126,39 @@ class ValidatorAgent(BaseAgent):
 
         session.validator = report
         return session
+
+    # ------------------------------------------------------------------
+    # Objective-fit invariants (Phase 1A — stress-test 2026-05-03 fixes)
+    # ------------------------------------------------------------------
+
+    def _validate_against_objective(
+        self,
+        priced: PricedCandidate,
+        objective: ClientObjective,
+        report: ValidatorReport,
+    ) -> None:
+        for rule in (
+            _rule_budget_breach,
+            _rule_delta_sign_vs_view,
+            _rule_capped_upside_contradiction,
+            _rule_neutral_yield_consistency,
+        ):
+            try:
+                rule(priced, objective, report)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "Validator objective-fit rule crash on %s: %s",
+                    priced.candidate.name,
+                    exc,
+                )
+                report.findings.append(
+                    ValidatorFinding(
+                        name=getattr(rule, "__name__", "objective_rule_crash"),
+                        severity=Severity.WARN,
+                        message=f"Validator objective rule crashed: {exc}",
+                        candidate_id=priced.candidate.candidate_id,
+                    ),
+                )
 
     # ------------------------------------------------------------------
     # Market intelligence (precedent comparison)
@@ -409,3 +489,194 @@ def _rule_feasible(
          message=msg,
          candidate_id=cand.candidate_id,
          remediation="Re-shape the structure or pick a different candidate.")
+
+
+# ---------------------------------------------------------------------------
+# Objective-fit invariants — operate on (PricedCandidate, ClientObjective).
+# Tagged with candidate_id so the Narrator's recommendation pass and the
+# validator-status column in the comparison table both see them on the
+# correct candidate.
+# ---------------------------------------------------------------------------
+
+
+def _rule_budget_breach(
+    priced: PricedCandidate,
+    objective: ClientObjective,
+    report: ValidatorReport,
+) -> None:
+    """Block recommendations whose net premium exceeds the stated budget by
+    more than 10bps of tolerance.
+
+    Sign convention: ``net_premium_bps > 0`` is a debit (client pays), < 0 is
+    a credit (client receives). For debits we compare directly. For credits
+    we only compare against budget when ``premium_tolerance == zero_cost_only``
+    — in every other tolerance band a credit is welcome.
+    """
+    budget = getattr(objective, "budget_bps_notional", None)
+    tolerance = getattr(objective, "premium_tolerance", None)
+    # Skip the check if the objective doesn't carry a premium tolerance.
+    if tolerance is None:
+        return
+    if budget is None:
+        return
+
+    bps = priced.net_premium_bps
+    cap = float(budget) + _BUDGET_TOLERANCE_BPS
+
+    if bps >= 0:
+        # Debit structure — straightforward budget check.
+        if bps > cap:
+            _add(
+                report,
+                name="budget_breach",
+                severity=Severity.BLOCK,
+                message=(
+                    f"Recommended structure premium {bps:.1f}bps exceeds budget "
+                    f"{float(budget):.1f}bps by {bps - float(budget):.1f}bps "
+                    f"(tolerance {_BUDGET_TOLERANCE_BPS:.0f}bps)."
+                ),
+                candidate_id=priced.candidate.candidate_id,
+                remediation=(
+                    "Re-strike, switch to a barrier variant, or pick the cheaper "
+                    "sibling candidate."
+                ),
+            )
+        return
+
+    # Credit case (bps < 0). Only relevant under zero_cost_only — otherwise a
+    # net credit is always within budget.
+    if tolerance == "zero_cost_only":
+        if abs(bps) > cap:
+            _add(
+                report,
+                name="budget_breach",
+                severity=Severity.BLOCK,
+                message=(
+                    f"Zero-cost mandate but structure shows {bps:.1f}bps net "
+                    f"credit (|premium| {abs(bps):.1f}bps > {cap:.1f}bps cap)."
+                ),
+                candidate_id=priced.candidate.candidate_id,
+                remediation=(
+                    "Re-strike legs to balance to ~0bps; do not return a credit "
+                    "when the brief is strictly zero-cost."
+                ),
+            )
+
+
+def _rule_delta_sign_vs_view(
+    priced: PricedCandidate,
+    objective: ClientObjective,
+    report: ValidatorReport,
+) -> None:
+    """Block recommendations whose net Δ contradicts the stated view.
+
+    A bullish view requires Δ ≥ -slop; a bearish-family view requires
+    Δ ≤ +slop. Anything inside |slop| is treated as flat for sign purposes.
+    Neutral views have no directional Δ constraint.
+    """
+    view = getattr(objective, "view", None)
+    if not view:
+        return
+
+    delta = priced.greeks.delta
+    is_bullish = view in _BULLISH_VIEWS
+    is_bearish = view in _BEARISH_VIEWS
+
+    if is_bullish and delta < -_DELTA_SIGN_SLOP:
+        _add(
+            report,
+            name="delta_sign_vs_view",
+            severity=Severity.BLOCK,
+            message=(
+                f"Recommended structure has Δ={delta:.2f} which contradicts "
+                f"{view} view."
+            ),
+            candidate_id=priced.candidate.candidate_id,
+            remediation=(
+                "Pick a long-call / call-spread / risk-reversal style instead "
+                "of an upside-capping or short-Δ structure."
+            ),
+        )
+    elif is_bearish and delta > _DELTA_SIGN_SLOP:
+        _add(
+            report,
+            name="delta_sign_vs_view",
+            severity=Severity.BLOCK,
+            message=(
+                f"Recommended structure has Δ={delta:.2f} which contradicts "
+                f"{view} view."
+            ),
+            candidate_id=priced.candidate.candidate_id,
+            remediation=(
+                "Pick a long-put / put-spread / collar style instead of a "
+                "long-Δ structure."
+            ),
+        )
+
+
+def _rule_capped_upside_contradiction(
+    priced: PricedCandidate,
+    objective: ClientObjective,
+    report: ValidatorReport,
+) -> None:
+    """Block recommendations that cap upside via a short call leg when the
+    client refused upside caps (``capped_upside_ok == False``).
+    """
+    if getattr(objective, "capped_upside_ok", True):
+        # Either True or unset/None — no constraint.
+        return
+
+    for leg in priced.candidate.legs:
+        if leg.quantity < 0 and leg.option_type.endswith("_call"):
+            _add(
+                report,
+                name="capped_upside_contradiction",
+                severity=Severity.BLOCK,
+                message=(
+                    f"Recommended structure caps upside via short {leg.strike} "
+                    f"call but client refused upside cap."
+                ),
+                candidate_id=priced.candidate.candidate_id,
+                remediation=(
+                    "Drop the short-call leg or replace the structure with a "
+                    "long-only / long-spread variant."
+                ),
+            )
+            return  # one finding per candidate is enough
+
+
+def _rule_neutral_yield_consistency(
+    priced: PricedCandidate,
+    objective: ClientObjective,
+    report: ValidatorReport,
+) -> None:
+    """Warn when a neutral yield-collecting brief gets a long-vol /
+    short-theta recommendation. The intent of ``view=neutral`` plus
+    medium/low premium tolerance is yield collection (covered call, short
+    strangle, iron condor) — long-vol/short-theta structures are the opposite.
+    """
+    view = getattr(objective, "view", None)
+    if view != "neutral":
+        return
+    tolerance = getattr(objective, "premium_tolerance", None)
+    if tolerance not in {"medium", "low"}:
+        return
+
+    vega = priced.greeks.vega
+    theta = priced.greeks.theta
+    if vega > _NEUTRAL_YIELD_VEGA_MAX or theta < _NEUTRAL_YIELD_THETA_MIN:
+        _add(
+            report,
+            name="neutral_yield_inconsistent",
+            severity=Severity.WARN,
+            message=(
+                f"Neutral yield brief but recommended is long-vol "
+                f"(vega={vega:.2f}) / short-theta (theta={theta:.4f}) — "
+                f"opposite of yield-collecting structure."
+            ),
+            candidate_id=priced.candidate.candidate_id,
+            remediation=(
+                "Switch to a yield-collecting structure (covered call, short "
+                "strangle, iron condor) — net short-vol, net long-theta."
+            ),
+        )
