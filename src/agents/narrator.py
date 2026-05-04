@@ -37,6 +37,146 @@ logger = logging.getLogger(__name__)
 _NARRATOR_SYSTEM = load_prompt("narrator/system.md")
 
 
+# ---------------------------------------------------------------------------
+# Title-composition + direction-filter constants
+# ---------------------------------------------------------------------------
+
+# Maps ClientObjective.view → human-readable phrase used in the memo title.
+_TITLE_DIRECTION_WORDS: dict[str, str] = {
+    "bullish": "Upside Participation",
+    "mildly_bullish": "Upside Participation",
+    "bearish": "Downside Protection",
+    "mildly_bearish": "Downside Protection",
+    "protect_gains": "Gain Lock-In",
+    "crash_hedge": "Tail Hedge",
+    "earnings_hedge": "Earnings Hedge",
+    "neutral": "Yield Enhancement",
+}
+
+# Direction-sign filter buckets — used to drop wrong-direction candidates from
+# the recommendation tiebreak before scoring.
+_BULLISH_VIEWS: frozenset[str] = frozenset({"bullish", "mildly_bullish"})
+_BEARISH_VIEWS: frozenset[str] = frozenset({
+    "bearish",
+    "mildly_bearish",
+    "protect_gains",
+    "crash_hedge",
+    "earnings_hedge",
+})
+
+# Underlying-class lookup (cheap, no MI/RAG hit). Keys are uppercased tickers.
+# Used for event-keyed caveat selection (e.g. REIT → FOMC, ENERGY → OPEC).
+_UNDERLYING_CLASS: dict[str, str] = {
+    "SPY": "BROAD",
+    "QQQ": "BROAD",
+    "IWM": "BROAD",
+    "SMH": "BROAD",
+    "DIA": "BROAD",
+    "XLK": "TECH",
+    "XLE": "ENERGY",
+    "XLV": "HEALTHCARE",
+    "XLF": "FINANCIALS",
+    "XLP": "STAPLES",
+    "XLY": "DISCRETIONARY",
+    "XLRE": "REIT",
+    "XLU": "UTILITIES",
+    "XLB": "MATERIALS",
+    "XLI": "INDUSTRIALS",
+    "XLC": "COMMUNICATIONS",
+    "VNQ": "REIT",
+    "IYR": "REIT",
+}
+
+# Event-keyed caveats. The lookup walks (view, class), then ("*", class), then
+# (view, "*"). Wildcard "*" means "any view" / "any class". Append all unique
+# matches found across these tiers.
+EVENT_CAVEATS: dict[tuple[str, str], list[str]] = {
+    ("earnings_hedge", "*"): [
+        "IV crush risk: ATM IV typically drops 30-40% post-print; long-vol legs lose value even on directional move.",
+        "Pin risk near short strikes on weekly expiry chains.",
+    ],
+    ("crash_hedge", "*"): [
+        "18mo+ tenor: meaningful theta drag and rho exposure (long-duration puts have rho ~ -3 per 1% rate).",
+    ],
+    ("protect_gains", "REIT"): [
+        "Rate-sensitive sector: FOMC catalyst risk over multi-month tenor; rho exposure non-trivial.",
+    ],
+    ("bearish", "ENERGY"): [
+        "Energy-specific catalysts: OPEC+ meeting cadence, EIA inventory releases, ex-div dates.",
+    ],
+    ("mildly_bearish", "ENERGY"): [
+        "Energy-specific catalysts: OPEC+ meeting cadence, EIA inventory releases, ex-div dates.",
+    ],
+    ("neutral", "HEALTHCARE"): [
+        "Constituent earnings cycle (UNH/JNJ/LLY/PFE/ABBV) creates rolling event-vol pickup; short-vol legs vulnerable.",
+    ],
+    # Fallback: forward-anchoring reminder for high-div (q>3%) underliers.
+    ("*", "REIT"): [
+        "High dividend yield - strikes priced against forward, not spot.",
+    ],
+    ("*", "STAPLES"): [
+        "Dividend-rich sector: forward sits above spot; verify strikes are forward-anchored, not spot-anchored.",
+    ],
+}
+
+
+def _compose_title(obj) -> str:
+    """Compose a dynamic memo title from the ClientObjective.
+
+    Replaces the legacy hardcoded "SPY Downside Protection (8m)" template that
+    leaked through the demo_replay fixture into every memo regardless of view
+    or underlying. Mirrors the existing helper-naming convention
+    (`_ensure_verdict_prefix`, `_ensure_mi_footer`).
+    """
+    underlying = (obj.underlying or "").upper() or "?"
+    direction_word = _TITLE_DIRECTION_WORDS.get(obj.view, obj.view.replace("_", " ").title())
+    horizon_days = int(obj.horizon_days or 0)
+    if horizon_days < 90:
+        tenor_label = f"{horizon_days}d"
+    else:
+        tenor_label = f"{horizon_days // 30}m"
+    return f"Internal RFQ - {underlying} {direction_word} ({tenor_label})"
+
+
+def _underlying_class(ticker: str) -> str:
+    """Map a ticker to a coarse asset/sector class for caveat lookup.
+
+    Returns 'OTHER' for unknown tickers — caveat lookup falls back to the
+    view-only wildcard row in that case.
+    """
+    return _UNDERLYING_CLASS.get((ticker or "").upper(), "OTHER")
+
+
+def _is_direction_compatible(pc: PricedCandidate, obj) -> bool:
+    """Reject candidates whose net delta points the wrong way for the brief.
+
+    Used as a hard pre-filter before the recommendation tiebreak loop. The
+    +/-0.05 dead-band tolerates near-zero-delta structures (e.g. fully
+    covered collars) without flagging them as wrong-direction.
+    """
+    delta = pc.greeks.delta
+    if obj.view in _BULLISH_VIEWS and delta < -0.05:
+        return False
+    if obj.view in _BEARISH_VIEWS and delta > +0.05:
+        return False
+    return True
+
+
+def _capped_upside_compatible(pc: PricedCandidate, obj) -> bool:
+    """Reject candidates that cap upside when the client refused the cap.
+
+    A short call leg (any kind) caps upside above its strike — incompatible
+    with `capped_upside_ok=False`. Iron condors / risk-reversals with
+    multi-leg short calls collapse to the same rule.
+    """
+    if obj.capped_upside_ok:
+        return True
+    for leg in pc.candidate.legs:
+        if leg.quantity < 0 and leg.option_type.endswith("_call"):
+            return False
+    return True
+
+
 class NarratorAgent(BaseAgent):
     name = "NarratorAgent"
 
@@ -76,6 +216,11 @@ class NarratorAgent(BaseAgent):
         # Force-restore the deterministic skeleton's invariants. The LLM may
         # have rewritten prose, but the table and verdict are non-negotiable.
         memo.comparison_table_md = deterministic_table
+        # The polish step may have replaced our composed title with a leaked
+        # template string from a replay fixture (legacy "SPY Downside
+        # Protection (8m)" payload). Detect and override with our deterministic
+        # compose — the underlying/view/tenor are load-bearing for ops triage.
+        memo.title = self._enforce_title_template(memo.title, session.objective)
         memo.title = self._ensure_verdict_prefix(memo.title, verdict_line, on_title=True)
         memo.objective_restatement = self._ensure_verdict_prefix(
             memo.objective_restatement, verdict_line, on_title=False
@@ -93,6 +238,43 @@ class NarratorAgent(BaseAgent):
         self._append_comparable_deals_section(memo, session)
         session.memo = memo
         return session
+
+    @staticmethod
+    def _enforce_title_template(text: str, obj) -> str:
+        """If the LLM polish replaced our composed title with a wrong-ticker
+        leak (the legacy "Internal RFQ - SPY Downside Protection (8m)" payload
+        from the demo_replay fixture is the canonical case), substitute our
+        deterministic compose for the leaked line. Preserves any VERDICT
+        prefix the polish step may have left in place.
+        """
+        if obj is None:
+            return text or ""
+        text = text or ""
+        composed = _compose_title(obj)
+        underlying_token = (obj.underlying or "").upper()
+        # Detect the leak: any line that starts with "Internal RFQ" but
+        # references a different ticker than the objective. Replace the
+        # offending line with the dynamically composed title.
+        out_lines: list[str] = []
+        replaced = False
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("internal rfq"):
+                if underlying_token and underlying_token in stripped.upper():
+                    # Already mentions our ticker — keep it (LLM produced an
+                    # acceptable per-RFQ title).
+                    out_lines.append(line)
+                else:
+                    out_lines.append(composed)
+                    replaced = True
+                continue
+            out_lines.append(line)
+        if replaced or any(l.strip().lower().startswith("internal rfq") for l in out_lines):
+            return "\n".join(out_lines)
+        # No "Internal RFQ" line at all (legacy "3-Way Structuring Memo" or
+        # any other LLM-coined title) — prepend the composed title so ops
+        # triage always has a deterministic anchor.
+        return f"{composed}\n{text}".strip()
 
     @staticmethod
     def _ensure_verdict_prefix(text: str, verdict: str, *, on_title: bool) -> str:
@@ -167,7 +349,7 @@ class NarratorAgent(BaseAgent):
         scenarios_by_id = {s.candidate_id: s for s in session.scenarios}
         validator = session.validator
 
-        recommended_id = self._heuristic_pick(priced, scenarios_by_id)
+        recommended_id, filter_caveat = self._heuristic_pick(priced, scenarios_by_id, obj)
         chosen = next(
             (p for p in priced if p.candidate.candidate_id == recommended_id),
             None,
@@ -176,9 +358,13 @@ class NarratorAgent(BaseAgent):
         verdict = self._verdict_line(chosen, scenarios_by_id, obj)
 
         # Title: prepend the verdict so a structurer reading the first line of
-        # the memo sees the pick before the metadata.
+        # the memo sees the pick before the metadata. The base title is
+        # composed dynamically from the objective (replaces the legacy
+        # "SPY Downside Protection (8m)" template that leaked through the
+        # demo_replay fixture into every memo).
+        rfq_title = _compose_title(obj)
         base_title = (
-            f"3-Way Structuring Memo — {obj.underlying} "
+            f"{rfq_title} - {obj.underlying} "
             f"${obj.notional_usd:,.0f} {obj.horizon_days}d {obj.view}"
         )
         title = f"VERDICT: {verdict}\n{base_title}"
@@ -200,7 +386,9 @@ class NarratorAgent(BaseAgent):
         recommendation_md = self._default_recommendation(
             recommended_id, priced, scenarios_by_id, obj, session.market_context
         )
-        caveats = self._caveats_for_memo(priced, scenarios_by_id, validator, obj)
+        caveats = self._caveats_for_memo(
+            priced, scenarios_by_id, validator, obj, filter_caveat=filter_caveat
+        )
         term_sheets = [
             TermSheetSnippet(
                 candidate_id=pc.candidate.candidate_id,
@@ -520,10 +708,30 @@ class NarratorAgent(BaseAgent):
     def _heuristic_pick(
         priced: list[PricedCandidate],
         scenarios_by_id: dict[str, ScenarioReport],
-    ) -> str:
+        obj,
+    ) -> tuple[str, Optional[str]]:
         """Score each candidate; pick the highest. Crash P&L weighted positive,
         |premium| weighted negative, hedgeability flag is gating.
+
+        Pre-filters the candidate list on direction (Δ-sign vs view) and
+        capped-upside compatibility before scoring. If every candidate fails
+        both filters, falls back to the original list and returns a caveat
+        flag — the structurer needs to know the recommendation may not
+        match the brief.
+
+        Returns (candidate_id, filter_caveat_or_None).
         """
+        eligible = [
+            pc for pc in priced
+            if _is_direction_compatible(pc, obj) and _capped_upside_compatible(pc, obj)
+        ]
+        filter_caveat: Optional[str] = None
+        if not eligible:
+            eligible = list(priced)
+            filter_caveat = (
+                "No candidate matches the client's direction / upside-cap "
+                "constraint - review strategist output before sending."
+            )
 
         def score(pc: PricedCandidate) -> float:
             sr = scenarios_by_id.get(pc.candidate.candidate_id)
@@ -538,8 +746,8 @@ class NarratorAgent(BaseAgent):
             premium_penalty = abs(pc.net_premium_bps) / 100.0  # bps → %
             return crash_pnl_pct * 100.0 - premium_penalty
 
-        ranked = sorted(priced, key=score, reverse=True)
-        return ranked[0].candidate.candidate_id
+        ranked = sorted(eligible, key=score, reverse=True)
+        return ranked[0].candidate.candidate_id, filter_caveat
 
     @staticmethod
     def _default_recommendation(
@@ -657,11 +865,21 @@ class NarratorAgent(BaseAgent):
         scenarios_by_id: dict[str, ScenarioReport],
         validator: Optional[ValidatorReport],
         obj,
+        *,
+        filter_caveat: Optional[str] = None,
     ) -> list[str]:
         """Action-oriented caveats: validator warnings + structural caveats
-        derived from the candidate set. Capped at 5 items, deduplicated, and
-        phrased as direct instructions to the salesperson."""
+        derived from the candidate set + event-keyed caveats from the
+        (view, underlying-class) lookup table. Capped at 6 items,
+        deduplicated, and phrased as direct instructions to the salesperson.
+        """
         out: list[str] = []
+
+        # 0. Direction / upside-cap filter caveat (only set when no candidate
+        # in the priced list satisfies the brief's direction / capped_upside
+        # constraints — the recommendation is then a least-bad fallback).
+        if filter_caveat:
+            out.append(filter_caveat)
 
         # 1. Validator warnings (already factual)
         if validator is not None:
@@ -722,6 +940,20 @@ class NarratorAgent(BaseAgent):
                     f"({worst_row.pnl_usd:+,.0f}) — verify drawdown tolerance."
                 )
 
+        # 4. Event-keyed caveats from the (view, underlying_class) lookup.
+        # Walks the lookup in order: (view, class), ("*", class), (view, "*").
+        # Wildcard "*" means "any". A caveat appears at most once even if
+        # matched by multiple tiers (deduped below).
+        view = (obj.view or "").strip()
+        u_class = _underlying_class(obj.underlying)
+        for key in (
+            (view, u_class),
+            ("*", u_class),
+            (view, "*"),
+        ):
+            for caveat in EVENT_CAVEATS.get(key, ()):
+                out.append(caveat)
+
         # Dedup, preserve order, cap.
         seen: set[str] = set()
         uniq: list[str] = []
@@ -729,7 +961,7 @@ class NarratorAgent(BaseAgent):
             if c not in seen:
                 seen.add(c)
                 uniq.append(c)
-        return uniq[:5]
+        return uniq[:6]
 
     # ------------------------------------------------------------------
     # Market-intelligence citations
