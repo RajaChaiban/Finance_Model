@@ -4,6 +4,7 @@
 
 import { getApiBaseUrl } from "./baseUrl";
 import { errorFromResponse } from "./errors";
+import type { Briefing } from "../types";
 
 // Dynamically set API URL - defaults to localhost:8002, but can be overridden with VITE_API_URL env var
 const API_BASE_URL = getApiBaseUrl();
@@ -187,6 +188,14 @@ export class APIClient {
       next_dividend_date: data.next_dividend_date,
       next_dividend_amount: data.next_dividend_amount,
     };
+  }
+
+  async getBriefing(): Promise<Briefing> {
+    const response = await fetch(`${API_BASE_URL}/api/briefing`);
+    if (!response.ok) {
+      throw await errorFromResponse(response, "Briefing not available");
+    }
+    return response.json();
   }
 }
 

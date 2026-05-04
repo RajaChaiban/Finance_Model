@@ -1,0 +1,532 @@
+"""Stress test scenario #5 — Macro fund SPY crash-hedge ahead of 2027 election cycle.
+
+$1B SPY core, 18mo crash_hedge, 100bps premium budget, barriers OK if knock-out
+is far enough out. Drives the structuring co-pilot end-to-end (Gates A → B → C)
+in DEMO_REPLAY mode, then runs an independent Monte Carlo overlay against the
+recommended candidate with hit-prob and tail conditional-payoff diagnostics.
+
+Run: ``python tests/stress/scenario_05.py``
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import os
+import sys
+from typing import Any
+from unittest.mock import patch
+
+# Must set BEFORE importing src.* so DEMO_REPLAY is honored on import.
+os.environ["DEMO_REPLAY"] = "1"
+os.environ["GEMINI_API_KEY"] = ""
+
+# Windows cp1252 cannot encode Greek letters in our Greeks line / table — switch
+# stdout to UTF-8 so the print block works regardless of host console codepage.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+except Exception:
+    pass
+
+import numpy as np
+
+# Ensure the repo root is on sys.path so `src.*` resolves when run as a script.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+
+from src.agents.orchestrator import (  # noqa: E402
+    OrchestratorAgent,
+    SessionStore,
+)
+from src.agents.state import (  # noqa: E402
+    Gate,
+    SessionStatus,
+)
+from src.agents import llm_client  # noqa: E402
+from src.config import agent_config  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Scenario fixture
+# ---------------------------------------------------------------------------
+
+RFQ_TEXT = (
+    "Macro fund, $1B SPY core, looking for 18mo crash_hedge ahead of 2027 "
+    "election cycle. 100bps tail premium budget. Barriers OK if knock-out is "
+    "far enough out."
+)
+
+INTAKE_PAYLOAD: dict[str, Any] = {
+    "underlying": "SPY",
+    "notional_usd": 1_000_000_000,
+    "view": "crash_hedge",
+    "horizon_days": 545,
+    "budget_bps_notional": 100,
+    "premium_tolerance": "medium",
+    "capped_upside_ok": False,
+    "barrier_appetite": True,
+    "constraints": ["tail focus, not delta-1 hedge"],
+    "clarifications_needed": [],
+}
+
+SPOT = 575.0
+VOL_30D = 0.17
+VOL_90D = 0.19
+DIV_YIELD = 0.013
+BUDGET_BPS = 100.0
+
+
+# ---------------------------------------------------------------------------
+# DEMO_REPLAY plumbing (mirrors tests/test_copilot_scenarios.py)
+# ---------------------------------------------------------------------------
+
+
+def _install_intake_replay(payload: dict[str, Any]) -> None:
+    client = llm_client.get_llm_client()
+    if client._replay_cache is None:  # noqa: SLF001
+        client._load_replay_cache()  # noqa: SLF001
+    client._replay_cache["IntakeAgent:nl"] = {  # noqa: SLF001
+        "text": json.dumps(payload),
+        "stop_reason": "end_turn",
+    }
+
+
+def _fake_market(spot: float, vol_30d: float, vol_90d: float, div: float):
+    return patch(
+        "src.agents.orchestrator.market_data.fetch_market_params",
+        return_value={
+            "spot_price": spot,
+            "dividend_yield": div,
+            "volatility_30d": vol_30d,
+            "volatility_90d": vol_90d,
+            "source": "fallback",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Monte Carlo path generator (shared across all overlays so we can re-use the
+# same paths for hit-prob / tail-conditional diagnostics).
+# ---------------------------------------------------------------------------
+
+
+def _simulate_paths(
+    *,
+    S0: float,
+    r: float,
+    q: float,
+    sigma: float,
+    T: float,
+    n_paths: int,
+    n_steps: int,
+    seed: int = 13,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Simulate GBM paths under risk-neutral measure.
+
+    Returns:
+        ST   (n_paths,)         terminal spot
+        mins (n_paths,)         path-minimum spot (over all monitored steps,
+                                including terminal node)
+    """
+    dt = T / n_steps
+    rng = np.random.default_rng(seed)
+    drift = (r - q - 0.5 * sigma * sigma) * dt
+    diff = sigma * math.sqrt(dt)
+
+    chunk = 5_000
+    ST_full = np.empty(n_paths, dtype=np.float64)
+    mins_full = np.empty(n_paths, dtype=np.float64)
+    cursor = 0
+    while cursor < n_paths:
+        n = min(chunk, n_paths - cursor)
+        z = rng.standard_normal((n, n_steps))
+        log_steps = drift + diff * z
+        log_paths = np.cumsum(log_steps, axis=1)
+        paths = S0 * np.exp(log_paths)
+        ST_full[cursor:cursor + n] = paths[:, -1]
+        mins_full[cursor:cursor + n] = paths.min(axis=1)
+        cursor += n
+    return ST_full, mins_full
+
+
+# ---------------------------------------------------------------------------
+# Driver
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    agent_config.reload()
+    llm_client.reset_llm_client()
+    _install_intake_replay(INTAKE_PAYLOAD)
+
+    with _fake_market(SPOT, VOL_30D, VOL_90D, DIV_YIELD):
+        orch = OrchestratorAgent(store=SessionStore())
+        session = orch.start_session(intake_nl=RFQ_TEXT)
+        if session.status != SessionStatus.AWAITING_GATE_A:
+            print(
+                f"FAIL: intake stalled — status={session.status} "
+                f"err={session.last_error}"
+            )
+            return 1
+
+        session = orch.decide_gate(session.session_id, Gate.A, approved=True)
+        if session.status != SessionStatus.AWAITING_GATE_B:
+            print(
+                f"FAIL: Gate A → B transition. status={session.status} "
+                f"err={session.last_error}"
+            )
+            return 1
+
+        session = orch.decide_gate(session.session_id, Gate.B, approved=True)
+        if session.status != SessionStatus.AWAITING_GATE_C:
+            print(
+                f"FAIL: Gate B → C transition. status={session.status} "
+                f"err={session.last_error}"
+            )
+            return 1
+
+        memo = session.memo
+        priced = session.priced
+        regime = session.regime
+
+        # ------------------------------------------------------------------
+        # Pick recommended candidate
+        # ------------------------------------------------------------------
+        rec_id = memo.recommended_candidate_id
+        rec = next(
+            (p for p in priced if p.candidate.candidate_id == rec_id),
+            None,
+        )
+        if rec is None:
+            print(f"FAIL: recommended_candidate_id {rec_id!r} not found in priced[]")
+            return 1
+        cand = rec.candidate
+
+        # ------------------------------------------------------------------
+        # MC overlay
+        # ------------------------------------------------------------------
+        # Match PricingAgent._pick_sigma: prefer atm_iv, then 30d, then 90d.
+        sigma = float(
+            regime.atm_iv
+            or regime.realised_vol_30d
+            or regime.realised_vol_90d
+            or VOL_30D
+        )
+        r = float(regime.risk_free_rate)
+        q = float(regime.dividend_yield)
+        S0 = float(regime.spot)
+        notional = cand.notional_usd
+
+        # Use the longest expiry on the candidate to drive the path simulator;
+        # all legs in this scenario share the same horizon.
+        T_days = max(l.expiry_days for l in cand.legs)
+        T = T_days / 365.0
+        # Daily monitoring resolution per the task spec.
+        n_steps = max(2, int(round(252.0 * T_days / 365.0)))
+        n_paths = 50_000
+
+        ST, mins = _simulate_paths(
+            S0=S0, r=r, q=q, sigma=sigma, T=T,
+            n_paths=n_paths, n_steps=n_steps, seed=13,
+        )
+        disc = math.exp(-r * T)
+
+        leg_overlays: list[dict[str, Any]] = []
+        # Per-leg shares (so MC USD totals match candidate.notional_usd legs).
+        for j, leg in enumerate(cand.legs):
+            ql_pershare = (
+                rec.per_leg_prices[j] / abs(leg.quantity)
+                if j < len(rec.per_leg_prices) and leg.quantity
+                else float("nan")
+            )
+            opt = leg.option_type.split("_")[1]  # 'call' | 'put'
+            kind_key = "european"
+            mc_pershare = float("nan")
+
+            # Terminal vanilla payoff (used for European legs and for the
+            # conditional-payoff inside KO/KI cases).
+            if opt == "put":
+                term_payoff = np.maximum(leg.strike - ST, 0.0)
+            else:
+                term_payoff = np.maximum(ST - leg.strike, 0.0)
+
+            if leg.option_type.startswith("european_"):
+                mc_pershare = float(disc * term_payoff.mean())
+
+            elif leg.option_type.startswith(("knockout_", "knockin_")):
+                B = leg.barrier_level
+                bkind = "out" if leg.option_type.startswith("knockout_") else "in"
+                kind_key = "knockout" if bkind == "out" else "knockin"
+                # Down barrier inferred from B<S0 (mirrors engine convention).
+                is_down = (B is not None) and (B < S0)
+                if B is None:
+                    mc_pershare = float("nan")
+                else:
+                    if is_down:
+                        breached = (mins <= B)
+                    else:
+                        # For an up-barrier the path-MAX is the relevant
+                        # monitor; we didn't store it, so re-simulate is
+                        # avoided by approximating with terminal — but in
+                        # practice crash-hedge KO_PUTs are always down.
+                        breached = (ST >= B)
+                    if bkind == "out":
+                        payoff = np.where(breached, 0.0, term_payoff)
+                    else:
+                        payoff = np.where(breached, term_payoff, 0.0)
+                    mc_pershare = float(disc * payoff.mean())
+
+            elif leg.option_type.startswith("american_"):
+                # American is overkill for an 18mo SPY tail hedge; flag and
+                # use European-MC as a lower-bound proxy.
+                mc_pershare = float(disc * term_payoff.mean())
+                kind_key = "american (Eu proxy)"
+
+            # Compare MC vs QL.
+            if math.isnan(mc_pershare) or math.isnan(ql_pershare):
+                delta_bps_spot = float("nan")
+                pct = float("nan")
+            else:
+                delta_bps_spot = (mc_pershare - ql_pershare) / S0 * 10_000.0
+                pct = (
+                    (mc_pershare - ql_pershare) / ql_pershare * 100.0
+                    if abs(ql_pershare) > 1e-9
+                    else float("nan")
+                )
+
+            leg_overlays.append({
+                "j": j,
+                "leg": leg,
+                "kind": kind_key,
+                "ql": ql_pershare,
+                "mc": mc_pershare,
+                "delta_bps": delta_bps_spot,
+                "pct": pct,
+            })
+
+        # ------------------------------------------------------------------
+        # Hit-probability + tail-conditional diagnostics
+        # ------------------------------------------------------------------
+        # Pick the protective put leg (long put, qty>0) to ground the diagnostics.
+        put_leg = next(
+            (l for l in cand.legs if l.option_type.endswith("_put") and l.quantity > 0),
+            None,
+        )
+        diag_strike = put_leg.strike if put_leg else 0.85 * S0
+        # Find the barrier (if any) on a barrier leg.
+        barrier_leg = next(
+            (l for l in cand.legs if l.barrier_level is not None),
+            None,
+        )
+        diag_barrier = barrier_leg.barrier_level if barrier_leg else None
+
+        # Path frac that hit strike at any time (path-min ≤ K)
+        prob_hit_strike = float((mins <= diag_strike).mean())
+        prob_hit_barrier = (
+            float((mins <= diag_barrier).mean()) if diag_barrier is not None else float("nan")
+        )
+        # Crash-conditional: fraction of paths with terminal spot ≤ 0.85*S0.
+        crash_threshold = 0.85 * S0
+        crash_mask = (ST <= crash_threshold)
+        prob_crash = float(crash_mask.mean())
+
+        # Expected payoff conditional on crash, on the recommended structure
+        # AS A WHOLE (sum of priced-MC payoffs across all legs, scaled to
+        # candidate quantities). We re-build payoffs per leg here — same
+        # path simulation, scaled by quantity (long >0, short <0).
+        path_pnl_per_path = np.zeros(n_paths, dtype=np.float64)
+        for leg in cand.legs:
+            opt = leg.option_type.split("_")[1]
+            if opt == "put":
+                tp = np.maximum(leg.strike - ST, 0.0)
+            else:
+                tp = np.maximum(ST - leg.strike, 0.0)
+            if leg.option_type.startswith(("knockout_", "knockin_")) and leg.barrier_level is not None:
+                B = leg.barrier_level
+                if B < S0:
+                    breached = (mins <= B)
+                else:
+                    breached = (ST >= B)
+                if leg.option_type.startswith("knockout_"):
+                    tp = np.where(breached, 0.0, tp)
+                else:
+                    tp = np.where(breached, tp, 0.0)
+            # quantity sign: long collects payoff at expiry, short pays it.
+            path_pnl_per_path += leg.quantity * tp
+
+        # Scale per-unit payoffs to USD using PricingAgent's convention:
+        #     USD = per_unit * (notional_usd / spot)
+        # That puts every leg in the same "1 unit per $S0 of notional" frame
+        # the memo prints in.
+        notional_scale = notional / S0 if S0 > 0 else 0.0
+
+        if crash_mask.any():
+            cond_payoff_pershare = float(path_pnl_per_path[crash_mask].mean()) if put_leg else float("nan")
+            cond_payoff_total_usd = (
+                float(path_pnl_per_path[crash_mask].mean()) * notional_scale
+            )
+        else:
+            cond_payoff_pershare = float("nan")
+            cond_payoff_total_usd = 0.0
+
+        cond_payoff_pct_notional = (
+            100.0 * cond_payoff_total_usd / notional if notional else float("nan")
+        )
+
+        # ------------------------------------------------------------------
+        # Verdict logic
+        # ------------------------------------------------------------------
+        # MC vs QL drift bands:
+        worst_van = 0.0
+        worst_bar = 0.0
+        for o in leg_overlays:
+            if math.isnan(o["pct"]):
+                continue
+            if o["kind"] == "european":
+                worst_van = max(worst_van, abs(o["pct"]))
+            elif o["kind"] in ("knockout", "knockin"):
+                worst_bar = max(worst_bar, abs(o["pct"]))
+
+        net_bps = rec.net_premium_bps
+        net_usd = rec.net_premium
+        delta_budget = net_bps - BUDGET_BPS
+        in_budget = net_bps <= BUDGET_BPS + 5  # 5bps tolerance
+        # Conditional crash payoff > 5% of notional ≈ desk-quality tail hedge.
+        tail_ok = cond_payoff_pct_notional > 5.0
+
+        engine_ok = (worst_van <= 1.0) and (worst_bar <= 5.0)
+
+        if engine_ok and in_budget and tail_ok:
+            verdict = "PASS"
+        elif engine_ok and (in_budget or tail_ok):
+            verdict = "WARN"
+        else:
+            verdict = "FAIL"
+
+        # ------------------------------------------------------------------
+        # Pretty-print
+        # ------------------------------------------------------------------
+        print("=" * 80)
+        print(
+            "STRESS SCENARIO 5 — SPY crash_hedge $1B 18mo 100bps barrier-OK"
+        )
+        print("=" * 80)
+        print(
+            f"VERDICT: {verdict}   "
+            f"worst_vanilla_drift={worst_van:.2f}%  "
+            f"worst_barrier_drift={worst_bar:.2f}%  "
+            f"in_budget={in_budget}  tail_ok={tail_ok}"
+        )
+        print(f"Memo title: {memo.title}")
+        print()
+        print(
+            f"Recommended: kind={cand.kind.value}  id={cand.candidate_id}  "
+            f"name={cand.name}"
+        )
+        for j, leg in enumerate(cand.legs):
+            barrier_s = ""
+            if leg.barrier_level is not None:
+                bpct = 100.0 * (leg.barrier_level / S0 - 1.0)
+                barrier_s = (
+                    f"  B={leg.barrier_level:.2f} ({bpct:+.1f}% spot, "
+                    f"{leg.barrier_monitoring})"
+                )
+            kpct = 100.0 * (leg.strike / S0 - 1.0)
+            print(
+                f"  leg[{j}] {leg.option_type}  qty={leg.quantity:+,.0f}  "
+                f"K={leg.strike:.2f} ({kpct:+.1f}% spot)  "
+                f"T={leg.expiry_days}d{barrier_s}"
+            )
+        print()
+        print(
+            f"Net premium: ${net_usd/1e6:,.2f}M  ({net_bps:+.2f} bps)  "
+            f"vs {BUDGET_BPS:.0f}bps budget — "
+            f"{'OVER' if delta_budget > 0 else 'UNDER'} by "
+            f"{abs(delta_budget):.2f} bps"
+        )
+        print(f"Method label: {rec.method_label}")
+        print()
+        gk = rec.greeks
+        print(
+            f"Greeks (Δ per $1 spot, vega per 1% σ, θ per cal day, ρ per 1% r): "
+            f"Δ={gk.delta:+.4f}  Γ={gk.gamma:+.6f}  vega={gk.vega:+.4f}  "
+            f"θ={gk.theta:+.4f}  ρ={gk.rho:+.4f}"
+        )
+        print()
+        print(
+            "--- MC OVERLAY (50,000 GBM paths, "
+            f"daily monitoring={n_steps} steps over {T_days}d) ---"
+        )
+        print(
+            f"  spot={S0:.2f}  r={r:.4f}  q={q:.4f}  sigma={sigma:.4f}  T={T:.4f}"
+        )
+        print(
+            f"  {'#':>2} {'option_type':<16} {'kind':<14} "
+            f"{'QL/sh':>10} {'MC/sh':>10} {'Δ(bps spot)':>12} {'%diff':>8}"
+        )
+        for o in leg_overlays:
+            print(
+                f"  {o['j']:>2} {o['leg'].option_type:<16} {o['kind']:<14} "
+                f"{o['ql']:>10.4f} {o['mc']:>10.4f} "
+                f"{o['delta_bps']:>12.2f} {o['pct']:>7.2f}%"
+            )
+        print()
+        print("--- HIT-PROBABILITY + TAIL DIAGNOSTICS (from MC paths) ---")
+        print(
+            f"  Diag strike (long put):  K={diag_strike:.2f} "
+            f"({100*(diag_strike/S0-1):+.1f}% spot)"
+        )
+        if diag_barrier is not None:
+            print(
+                f"  Diag barrier:            B={diag_barrier:.2f} "
+                f"({100*(diag_barrier/S0-1):+.1f}% spot)"
+            )
+        else:
+            print("  Diag barrier:            (no barrier leg present)")
+        print(
+            f"  P(path-min ≤ strike)     = {100*prob_hit_strike:.2f}%"
+        )
+        if not math.isnan(prob_hit_barrier):
+            print(
+                f"  P(path-min ≤ barrier)    = {100*prob_hit_barrier:.2f}%"
+            )
+        print(f"  P(S_T ≤ 0.85·S0 = {crash_threshold:.2f}) = {100*prob_crash:.2f}%")
+        print(
+            f"  E[total structure payoff | S_T ≤ 0.85·S0] = "
+            f"${cond_payoff_total_usd:,.0f}  "
+            f"({cond_payoff_pct_notional:.2f}% of ${notional/1e9:.2f}B notional)"
+        )
+        print()
+        print("--- VALIDATOR FINDINGS ---")
+        if session.validator and session.validator.findings:
+            for f in session.validator.findings:
+                cid = f" cand={f.candidate_id}" if f.candidate_id else ""
+                print(f"  [{f.severity.value:5}] {f.name}{cid}: {f.message}")
+        else:
+            print("  (none)")
+        print()
+        print("--- COMPARISON TABLE (10 cols, from memo) ---")
+        print(memo.comparison_table_md.strip())
+        print()
+        print("--- CAVEATS ---")
+        for c in memo.caveats:
+            print(f"  - {c}")
+        print()
+        print("--- RECOMMENDATION (truncated 1500) ---")
+        print(memo.recommendation_md[:1500])
+        print()
+        print("=" * 80)
+
+        # Gate C → DONE
+        session = orch.decide_gate(session.session_id, Gate.C, approved=True)
+        if session.status != SessionStatus.DONE:
+            print(f"FAIL: Gate C → DONE. status={session.status}")
+            return 1
+        print(f"Final session status: {session.status.value}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

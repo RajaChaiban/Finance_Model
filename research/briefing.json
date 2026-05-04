@@ -1,0 +1,261 @@
+{
+  "as_of": "2026-05-04T03:02:59+00:00",
+  "title": "US Macro & Equity Briefing — May 3, 2026",
+  "summary": "10Y Treasuries sit at 4.40% against a Fed Funds Rate of 3.64%; the yield curve is mildly positive.  VIX at 17.0 reflects a balanced vol regime; no strong directional bias in implied vol.  S&P 500 at 7,230 (+0.29% on the day) reflects a risk-on tape; YTD return stands at n/a%.  Sector rotation: Technology leads (+1.5%), while Energy lags (-1.3%); watch option flow in the lagging sector for mean-reversion setups.",
+  "macro": [
+    {
+      "label": "10Y Treasury",
+      "series_id": "DGS10",
+      "value": "4.40%",
+      "delta_1d": "n/a",
+      "as_of": "2026-04-30",
+      "context": "10Y at 4.40% — watch for Fed pivot signals."
+    },
+    {
+      "label": "2Y Treasury",
+      "series_id": "DGS2",
+      "value": "3.88%",
+      "delta_1d": "n/a",
+      "as_of": "2026-04-30",
+      "context": "2Y at 3.88% — easing expectations building."
+    },
+    {
+      "label": "10Y-2Y Spread",
+      "series_id": "T10Y2Y",
+      "value": "0.51%",
+      "delta_1d": "n/a",
+      "as_of": "2026-05-01",
+      "context": "Curve +0.51% — steepening; financials may outperform."
+    },
+    {
+      "label": "Fed Funds Rate",
+      "series_id": "DFF",
+      "value": "3.64%",
+      "delta_1d": "n/a",
+      "as_of": "2026-04-30",
+      "context": "FFR at 3.64% — easing cycle underway."
+    },
+    {
+      "label": "SOFR",
+      "series_id": "SOFR",
+      "value": "3.66%",
+      "delta_1d": "n/a",
+      "as_of": "2026-04-30",
+      "context": "SOFR at 3.66% — near FFR; overnight collateral market stable."
+    },
+    {
+      "label": "VIX (FRED)",
+      "series_id": "VIXCLS",
+      "value": "16.89",
+      "delta_1d": "n/a",
+      "as_of": "2026-04-30",
+      "context": "VIX at 16.9 — normal vol; balanced risk exposure."
+    }
+  ],
+  "equity": {
+    "indices": [
+      {
+        "symbol": "^GSPC",
+        "name": "S&P 500",
+        "level": 7230.12,
+        "change_pct": 0.29,
+        "ytd_pct": "n/a"
+      },
+      {
+        "symbol": "^IXIC",
+        "name": "NASDAQ Composite",
+        "level": 25114.44,
+        "change_pct": 0.89,
+        "ytd_pct": "n/a"
+      },
+      {
+        "symbol": "^DJI",
+        "name": "Dow Jones Industrial Average",
+        "level": 49499.27,
+        "change_pct": -0.31,
+        "ytd_pct": "n/a"
+      },
+      {
+        "symbol": "^RUT",
+        "name": "Russell 2000",
+        "level": 2812.82,
+        "change_pct": 0.46,
+        "ytd_pct": "n/a"
+      }
+    ],
+    "vol": [
+      {
+        "symbol": "^VIX",
+        "level": 16.99,
+        "change_pct": 0.59,
+        "regime": "normal"
+      }
+    ],
+    "sector_movers": [
+      {
+        "sector": "Technology",
+        "etf": "XLK",
+        "change_pct": 1.49,
+        "driver": "AI/semis led gains (+1.5%); rate sensitivity a headwind."
+      },
+      {
+        "sector": "Energy",
+        "etf": "XLE",
+        "change_pct": -1.34,
+        "driver": "Crude oil price action drove energy sold off (-1.3%)."
+      },
+      {
+        "sector": "Industrials",
+        "etf": "XLI",
+        "change_pct": -0.93,
+        "driver": "PMI/capex tone sent industrials sold off (-0.9%)."
+      },
+      {
+        "sector": "Utilities",
+        "etf": "XLU",
+        "change_pct": -0.64,
+        "driver": "Rate-sensitive utilities sold off (-0.6%); rate move in focus."
+      },
+      {
+        "sector": "Health Care",
+        "etf": "XLV",
+        "change_pct": -0.57,
+        "driver": "Biotech/pharma sold off (-0.6%); FDA calendar and managed-care in focus."
+      },
+      {
+        "sector": "Financials",
+        "etf": "XLF",
+        "change_pct": -0.4,
+        "driver": "Banks sold off (-0.4%); curve shape and credit-spread moves in focus."
+      },
+      {
+        "sector": "Consumer Discretionary",
+        "etf": "XLY",
+        "change_pct": 0.24,
+        "driver": "Consumer spending outlook pushed discretionary rallied (+0.2%)."
+      },
+      {
+        "sector": "Materials",
+        "etf": "XLB",
+        "change_pct": -0.23,
+        "driver": "Commodity prices and China demand signals drove materials sold off (-0.2%)."
+      },
+      {
+        "sector": "Real Estate",
+        "etf": "XLRE",
+        "change_pct": -0.18,
+        "driver": "REIT sector sold off (-0.2%); rate sensitivity key."
+      },
+      {
+        "sector": "Communication Services",
+        "etf": "XLC",
+        "change_pct": 0.18,
+        "driver": "Ad spend and streaming sentiment sent comms rallied (+0.2%)."
+      },
+      {
+        "sector": "Consumer Staples",
+        "etf": "XLP",
+        "change_pct": -0.17,
+        "driver": "Defensives underperformed (-0.2%); risk-off outflows."
+      }
+    ]
+  },
+  "headlines": [
+    {
+      "title": "Jobs day, semiconductor earnings, and stock market momentum: What to watch this week",
+      "source": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/markets/article/jobs-day-semiconductor-earnings-and-stock-market-momentum-what-to-watch-this-week-100000536.html",
+      "published": "2026-05-03"
+    },
+    {
+      "title": "'It's a boom': Wall Street sees more market gains as strong earnings fuel the AI trade",
+      "source": "Yahoo Finance",
+      "url": "https://finance.yahoo.com/markets/article/its-a-boom-wall-street-sees-more-market-gains-as-strong-earnings-fuel-the-ai-trade-130032453.html",
+      "published": "2026-05-03"
+    },
+    {
+      "title": "Dow Jones Futures: Trump Says U.S. To 'Guide' Ships Through Hormuz",
+      "source": "Investor's Business Daily",
+      "url": "https://www.investors.com/market-trend/stock-market-today/dow-jones-futures-sp-500-apple-broadcom-buy-zones/?src=A00220&yptr=yahoo",
+      "published": "2026-05-04"
+    },
+    {
+      "title": "3 Industrials Stocks with Warning Signs",
+      "source": "StockStory",
+      "url": "https://finance.yahoo.com/markets/stocks/articles/3-industrials-stocks-warning-signs-014055445.html",
+      "published": "2026-05-04"
+    },
+    {
+      "title": "Why AMD Stock Skyrocketed 74% in April",
+      "source": "Motley Fool",
+      "url": "https://www.fool.com/investing/2026/05/03/amd-stock-amd-earnings-date-when-best-ai-stocks/",
+      "published": "2026-05-04"
+    },
+    {
+      "title": "This High-Yield Bond ETF Offers Steady Cash Flow and Low Volatility",
+      "source": "24/7 Wall St.",
+      "url": "https://247wallst.com/investing/2026/05/03/this-high-yield-bond-etf-offers-steady-cash-flow-and-low-volatility/",
+      "published": "2026-05-04"
+    }
+  ],
+  "themes": [
+    "Rates: 10Y at 4.40% — range-bound; key support/resistance at 4.0/4.5%.",
+    "Yield curve +0.51% — steepening supports bank stocks and reflation trades.",
+    "Vol regime: VIX 17.0 — consider long-dated variance swaps as tail hedge at low premium.",
+    "Sector focus: Technology (XLK +1.5%) — AI/semis led gains (+1.5%); rate sensitivity a headwind.",
+    "Event risk: monitor Fed speak and any surprise macro prints for vol spike triggers.",
+    "Skew: if VIX < 16, downside puts are cheap — accumulate 1M S&P 500 put spreads into strength."
+  ],
+  "sources": [
+    {
+      "name": "FRED:DGS10",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "FRED:DGS2",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "FRED:T10Y2Y",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=T10Y2Y",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "FRED:DFF",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFF",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "FRED:SOFR",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=SOFR",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "FRED:VIXCLS",
+      "url": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=VIXCLS",
+      "fetched_at": "2026-05-04T03:02:59+00:00"
+    },
+    {
+      "name": "yfinance (indices)",
+      "url": "https://finance.yahoo.com",
+      "fetched_at": "2026-05-04T03:03:07+00:00"
+    },
+    {
+      "name": "yfinance (^VIX)",
+      "url": "https://finance.yahoo.com/quote/%5EVIX",
+      "fetched_at": "2026-05-04T03:03:08+00:00"
+    },
+    {
+      "name": "yfinance (sector ETFs)",
+      "url": "https://finance.yahoo.com",
+      "fetched_at": "2026-05-04T03:03:08+00:00"
+    },
+    {
+      "name": "yfinance news (^GSPC)",
+      "url": "https://finance.yahoo.com/quote/%5EGSPC/news",
+      "fetched_at": "2026-05-04T03:03:09+00:00"
+    }
+  ]
+}

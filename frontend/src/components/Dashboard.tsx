@@ -5,6 +5,7 @@ import { CopilotPanel } from "./CopilotPanel";
 import { Header } from "./Header";
 import { IndexTickerStrip } from "./IndexTickerStrip";
 import { MoversGrid } from "./MoversGrid";
+import { BriefingPanel } from "./BriefingPanel";
 import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
 import { useMarketMovers } from "../hooks/useMarketMovers";
@@ -144,6 +145,8 @@ export function Dashboard() {
           />
         </div>
       </div>
+
+      <BriefingPanel />
 
       <MoversGrid
         gainers={movers.data?.gainers ?? []}

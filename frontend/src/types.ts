@@ -173,6 +173,67 @@ export const VARIANCE_REDUCTION_METHODS = [
   { value: "control_variate", label: "Control Variate" },
 ];
 
+// ---- Macro Briefing types ---------------------------------------------------
+
+export interface BriefingMacroRow {
+  label: string;
+  series_id: string;
+  value: string;
+  delta_1d: string;
+  as_of: string;
+  context: string;
+}
+
+export interface BriefingIndex {
+  symbol: string;
+  name: string;
+  level: number;
+  change_pct: number;
+  ytd_pct: number;
+}
+
+export interface BriefingVol {
+  symbol: string;
+  level: number;
+  change_pct: number;
+  regime: "low" | "normal" | "elevated" | "stressed";
+}
+
+export interface BriefingSectorMover {
+  sector: string;
+  etf: string;
+  change_pct: number;
+  driver: string;
+}
+
+export interface BriefingHeadline {
+  title: string;
+  source: string;
+  url: string;
+  published: string;
+}
+
+export interface BriefingSource {
+  name: string;
+  url: string;
+  fetched_at: string;
+}
+
+export interface Briefing {
+  as_of: string;
+  title: string;
+  summary: string;
+  macro: BriefingMacroRow[];
+  equity: {
+    indices: BriefingIndex[];
+    vol: BriefingVol[];
+    sector_movers: BriefingSectorMover[];
+  };
+  headlines: BriefingHeadline[];
+  themes: string[];
+  sources: BriefingSource[];
+}
+
 export const DEFAULT_CONFIG: ConfigFormState = {
   underlying: "SPY",
   spotPrice: 0,

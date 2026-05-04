@@ -1,6 +1,8 @@
 """FastAPI application for derivatives pricing."""
 
+import json
 import logging
+from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -210,6 +212,30 @@ async def fetch_movers(universe: str = "default"):
     except Exception as e:
         logger.error(f"Failed to build movers payload: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Could not fetch movers")
+
+
+_BRIEFING_PATH = Path(__file__).parent.parent.parent / "research" / "briefing.json"
+
+
+@app.get("/api/briefing")
+async def get_briefing():
+    """
+    Return the latest macro/equity briefing produced by the research agent.
+
+    Reads ``research/briefing.json`` from the repo root on every call (no
+    caching — the file is regenerated at most once per morning).  Returns
+    HTTP 503 when the file does not yet exist.
+    """
+    if not _BRIEFING_PATH.exists():
+        raise HTTPException(
+            status_code=503,
+            detail="briefing not yet generated",
+        )
+    try:
+        return json.loads(_BRIEFING_PATH.read_text(encoding="utf-8"))
+    except Exception as exc:
+        logger.error("Failed to read briefing.json: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not read briefing file")
 
 
 @app.post("/api/price", response_model=PricingResult)
