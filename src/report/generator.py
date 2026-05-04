@@ -295,6 +295,13 @@ def generate_report(results: Dict[str, Any], config: Any, show_plot: bool = Fals
     if config.barrier_level:
         params.append(("Barrier Level", f"${config.barrier_level:.2f}"))
 
+    sigma_atm = results.get("sigma_atm")
+    sigma_barrier = results.get("sigma_barrier")
+    if sigma_atm is not None:
+        params.append(("Sigma at Strike (from surface)", f"{sigma_atm:.2%}"))
+    if sigma_barrier is not None:
+        params.append(("Sigma at Barrier (from surface)", f"{sigma_barrier:.2%}"))
+
     for param_name, value in params:
         html_content += f"""
                 <tr>
@@ -334,7 +341,7 @@ def generate_report(results: Dict[str, Any], config: Any, show_plot: bool = Fals
     filename = f"{config.underlying}_{config.option_type}_{timestamp}.html"
     filepath = save_dir / filename
 
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(html_content)
 
     return str(filepath)

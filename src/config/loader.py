@@ -1,9 +1,9 @@
 """Config loader for derivatives pricing pipeline."""
 
 import yaml
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 
 @dataclass
@@ -27,10 +27,30 @@ class PricingConfig:
     # Optional barrier (for knockout options)
     barrier_level: Optional[float] = None
     barrier_type: Optional[str] = None
+    # Barrier monitoring frequency. Defaults to "continuous" for backwards
+    # compatibility (matches the analytic Reiner-Rubinstein assumption); set
+    # to "daily" / "weekly" / "monthly" to trigger the BGK shift on B.
+    monitoring: str = "continuous"
+
+    # Optional discrete cash dividend schedule for American options.
+    # List of (iso_date_str, amount_float) pairs. None = use continuous
+    # dividend_yield instead (default behaviour).
+    dividend_schedule: Optional[List[List]] = None
+
+    # Optional Asian fields
+    averaging_method: Optional[str] = None       # "geometric" | "arithmetic"
+    averaging_frequency: Optional[str] = None    # "daily" | "weekly" | "monthly"
+
+    # Optional lookback fields
+    lookback_type: Optional[str] = None          # "fixed" | "floating"
 
     # Output
     report_format: str = "html"
     save_to: str = "./reports/"
+
+    # Live IV surface (opt-in via CLI / YAML)
+    use_vol_surface: bool = False
+    vol_surface_max_expiries: int = 6
 
     def __post_init__(self):
         """Validate after initialization."""
@@ -41,7 +61,14 @@ class PricingConfig:
         errors = []
 
         # Option type
-        valid_types = ["american_put", "american_call", "european_put", "european_call", "knockout_call", "knockout_put"]
+        valid_types = [
+            "american_put", "american_call",
+            "european_put", "european_call",
+            "knockout_call", "knockout_put",
+            "knockin_call", "knockin_put",
+            "asian_call", "asian_put",
+            "lookback_call", "lookback_put",
+        ]
         if self.option_type not in valid_types:
             errors.append(f"option_type must be one of {valid_types}, got '{self.option_type}'")
 
@@ -61,11 +88,13 @@ class PricingConfig:
         if self.dividend_yield < 0:
             errors.append(f"dividend_yield cannot be negative, got {self.dividend_yield}")
 
-        # Volatility
+        # Volatility. Upper bound 5.0 matches the API model and the IV
+        # solver bracket (solver.py). Distressed single-names, post-event vol,
+        # and crypto-linked products routinely run above 100%.
         if self.volatility <= 0:
             errors.append(f"volatility must be > 0, got {self.volatility}")
-        if self.volatility > 1.0:
-            errors.append(f"volatility seems too high ({self.volatility:.0%}), expected < 100%")
+        if self.volatility > 5.0:
+            errors.append(f"volatility {self.volatility:.0%} exceeds 500% — fat-finger guard")
 
         # Monte Carlo
         if self.n_paths <= 0:
@@ -76,12 +105,61 @@ class PricingConfig:
         if self.variance_reduction not in ["none", "antithetic"]:
             errors.append(f"variance_reduction must be 'none' or 'antithetic', got '{self.variance_reduction}'")
 
-        # Barrier (if knockout)
-        if "knockout" in self.option_type:
+        # Monitoring frequency. Must match what the engines accept.
+        if self.monitoring not in ("continuous", "daily", "weekly", "monthly"):
+            errors.append(
+                f"monitoring must be one of 'continuous'|'daily'|'weekly'|'monthly', got '{self.monitoring}'"
+            )
+
+        # Dividend schedule: shape check only (date validity is checked at
+        # conversion time in handlers/main).
+        if self.dividend_schedule is not None:
+            if not isinstance(self.dividend_schedule, (list, tuple)):
+                errors.append(
+                    f"dividend_schedule must be a list of [iso_date, amount] pairs, got {type(self.dividend_schedule).__name__}"
+                )
+            else:
+                for i, entry in enumerate(self.dividend_schedule):
+                    if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+                        errors.append(
+                            f"dividend_schedule[{i}] must be a [iso_date, amount] pair, got {entry!r}"
+                        )
+
+        # Barrier (KO and KI both require a barrier_level + direction).
+        if "knockout" in self.option_type or "knockin" in self.option_type:
             if self.barrier_level is None:
-                errors.append("knockout options require barrier_level")
-            if self.barrier_type not in ["down_and_out", "up_and_out"]:
-                errors.append(f"barrier_type must be 'down_and_out' or 'up_and_out', got '{self.barrier_type}'")
+                errors.append("barrier options require barrier_level")
+            valid_barrier_types = [
+                "down_and_out", "up_and_out", "down_and_in", "up_and_in",
+            ]
+            if self.barrier_type not in valid_barrier_types:
+                errors.append(
+                    f"barrier_type must be one of {valid_barrier_types}, got '{self.barrier_type}'"
+                )
+
+        # Asian: averaging method + frequency. Default if omitted.
+        if self.option_type.startswith("asian_"):
+            if self.averaging_method is None:
+                self.averaging_method = "geometric"
+            if self.averaging_frequency is None:
+                self.averaging_frequency = "daily"
+            if self.averaging_method not in ("geometric", "arithmetic"):
+                errors.append(
+                    f"averaging_method must be 'geometric' or 'arithmetic', got '{self.averaging_method}'"
+                )
+            if self.averaging_frequency not in ("daily", "weekly", "monthly"):
+                errors.append(
+                    f"averaging_frequency must be 'daily'|'weekly'|'monthly', got '{self.averaging_frequency}'"
+                )
+
+        # Lookback: fixed or floating strike. Default if omitted.
+        if self.option_type.startswith("lookback_"):
+            if self.lookback_type is None:
+                self.lookback_type = "fixed"
+            if self.lookback_type not in ("fixed", "floating"):
+                errors.append(
+                    f"lookback_type must be 'fixed' or 'floating', got '{self.lookback_type}'"
+                )
 
         if errors:
             raise ValueError("Config validation failed:\n  " + "\n  ".join(errors))
@@ -140,10 +218,25 @@ def load_config(config_path: str) -> PricingConfig:
         # Barrier
         "barrier_level": option_cfg.get("barrier_level"),
         "barrier_type": option_cfg.get("barrier_type"),
+        "monitoring": option_cfg.get("monitoring", "continuous"),
+
+        # Discrete dividend schedule (American options only). Read from the
+        # ``option:`` section as a list of [iso_date, amount] pairs. None =>
+        # use continuous dividend_yield (default).
+        "dividend_schedule": option_cfg.get("dividend_schedule"),
+
+        # Asian / lookback (optional; defaulted in _validate)
+        "averaging_method": option_cfg.get("averaging_method"),
+        "averaging_frequency": option_cfg.get("averaging_frequency"),
+        "lookback_type": option_cfg.get("lookback_type"),
 
         # Output
         "report_format": output_cfg.get("report_format", "html"),
         "save_to": output_cfg.get("save_to", "./reports/"),
+
+        # Surface (opt-in)
+        "use_vol_surface": option_cfg.get("use_vol_surface", False),
+        "vol_surface_max_expiries": option_cfg.get("vol_surface_max_expiries", 6),
     }
 
     # Validate required fields

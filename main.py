@@ -57,8 +57,18 @@ Examples:
         action="store_true",
         help="Skip structurer financial analyst review"
     )
+    parser.add_argument(
+        "--use-vol-surface",
+        action="store_true",
+        help="Calibrate a live SPY implied-vol surface from the option chain "
+             "and price against it (requires --fetch-market-data)."
+    )
 
     args = parser.parse_args()
+    if args.use_vol_surface and not args.fetch_market_data:
+        # The surface needs a live chain. Auto-enable rather than error.
+        logger.info("--use-vol-surface implies --fetch-market-data; enabling.")
+        args.fetch_market_data = True
 
     try:
         # Load config
@@ -68,6 +78,34 @@ Examples:
         print(f"  Underlying: {config.underlying}")
         print(f"  Strike: ${config.strike_price:.2f}")
         print(f"  Expiration: {config.days_to_expiration} days")
+
+        # Convert ISO-string dividend schedule to QL ql.Date tuples once;
+        # None when no schedule was specified, in which case the router uses
+        # the continuous-yield approximation.
+        ql_dividend_schedule = None
+        if config.dividend_schedule:
+            from datetime import date as _date
+            import QuantLib as ql_for_divs
+            ql_dividend_schedule = []
+            for entry in config.dividend_schedule:
+                iso, amount = entry[0], entry[1]
+                d = _date.fromisoformat(str(iso))
+                ql_dividend_schedule.append(
+                    (ql_for_divs.Date(d.day, d.month, d.year), float(amount))
+                )
+
+        # Discrete dividend schedules are only consumed by the American
+        # engines; the router's ``_ql_kwargs`` filter forwards only surface
+        # kwargs and would otherwise drop ``dividend_schedule`` for non-American
+        # products without a peep. Warn loudly so a CLI user does not believe
+        # discrete divs were applied when they were not.
+        if ql_dividend_schedule and not config.option_type.startswith("american_"):
+            logger.warning(
+                "dividend_schedule supplied for %s but only American options "
+                "consume discrete divs; ignoring. Use dividend_yield for "
+                "continuous q on this product.",
+                config.option_type,
+            )
 
         # Prepare pricing parameters
         pricing_params = {
@@ -81,6 +119,14 @@ Examples:
             "n_steps": config.n_steps,
             "variance_reduction": config.variance_reduction,
             "barrier_level": config.barrier_level,
+            # Barrier monitoring frequency. Defaults to "continuous" so the
+            # CLI matches the YAML loader default; flip to daily/weekly/monthly
+            # in the YAML to enable BGK-shifted barrier pricing.
+            "monitoring": config.monitoring,
+            # Discrete cash dividend schedule for American options. None =>
+            # continuous-yield approximation; non-empty => FDM with QL
+            # DividendSchedule.
+            "dividend_schedule": ql_dividend_schedule,
         }
 
         # Fetch market data if requested
@@ -121,6 +167,58 @@ Examples:
             else:
                 logger.info(f"  Dividend Yield: {config.dividend_yield:.2%} (from config)")
 
+        # Build live IV surface if requested
+        if args.use_vol_surface or config.use_vol_surface:
+            try:
+                import QuantLib as ql
+                from src.api.market_data import fetch_option_chain
+                from src.data.iv_grid import build_iv_grid
+                from src.data.vol_surface import build_vol_surface, sample_sigma_for_closed_form
+
+                logger.info(
+                    f"Calibrating live IV surface for {config.underlying} "
+                    f"(max {config.vol_surface_max_expiries} expiries)..."
+                )
+                chain = fetch_option_chain(
+                    config.underlying,
+                    max_expiries=config.vol_surface_max_expiries,
+                )
+                if not chain:
+                    logger.warning(
+                        "Empty option chain — falling back to flat-vol pricing."
+                    )
+                else:
+                    grid = build_iv_grid(
+                        chain,
+                        S=pricing_params["S"],
+                        r=pricing_params["r"],
+                        q=pricing_params["q"],
+                    )
+                    surface = build_vol_surface(grid)
+                    vol_handle = ql.BlackVolTermStructureHandle(surface)
+                    pricing_params["vol_handle"] = vol_handle
+
+                    # Closed-form bridge: also override scalar σ with the
+                    # smile-aware sample so the hand-coded BS / Reiner-Rubinstein
+                    # paths see a smile-relevant σ when QL isn't available.
+                    pricing_params["sigma"] = sample_sigma_for_closed_form(
+                        surface,
+                        K=pricing_params["K"],
+                        T=pricing_params["T"],
+                        S=pricing_params["S"],
+                        barrier=pricing_params.get("barrier_level"),
+                    )
+                    logger.info(
+                        f"  Surface σ at (K={pricing_params['K']:.2f}, "
+                        f"T={pricing_params['T']:.4f}): "
+                        f"{pricing_params['sigma']:.2%} "
+                        f"(grid {grid.n_quotes_inverted}/{grid.n_quotes_total} quotes)."
+                    )
+            except Exception as exc:
+                logger.warning(
+                    f"Vol surface build failed ({exc}); falling back to flat vol."
+                )
+
         # Route to appropriate pricing engine
         print(f"\nRouting to pricing engine...")
         pricer_func, greeks_func, method_description = router.route(config.option_type)
@@ -135,11 +233,15 @@ Examples:
 
         # Calculate Greeks
         print(f"Calculating Greeks...")
-        # Filter params for Greeks function (don't pass barrier_level, etc.)
         greeks_params = {k: v for k, v in pricing_params.items() if k in [
-            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps"
+            "S", "K", "r", "sigma", "T", "q", "n_paths", "n_steps",
+            "barrier_level", "vol_handle",
+            "monitoring", "dividend_schedule",
         ]}
         greeks = greeks_func(**greeks_params)
+        # Drop the meta pin_risk flag from the dict the report sees so the
+        # numeric Greek loop below doesn't try to format a bool.
+        greeks.pop("pin_risk", None)
 
         print(f"\nGreeks:")
         for greek, value in greeks.items():

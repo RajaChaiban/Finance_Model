@@ -6,3 +6,18 @@ pyyaml>=5.4.0
 jinja2>=3.0.0
 yfinance>=0.2.0
 QuantLib>=1.42.0
+
+# Agent layer (Phase 1+)
+google-genai>=1.0.0
+python-dotenv>=1.0.0
+httpx>=0.27.0
+sse-starlette>=2.0.0
+pydantic>=2.0.0
+reportlab>=4.0
+
+# Market-intelligence (RAG) layer — see src/agents/market_intelligence.py.
+# All three are gated by MARKET_INTEL_ENABLED; the agent pipeline runs
+# without them when the flag is off.
+chromadb>=0.4
+sentence-transformers>=2.2
+loguru>=0.7

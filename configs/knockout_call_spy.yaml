@@ -1,13 +1,14 @@
 option:
   type: knockout_call
   underlying: SPY
-  spot_price: 5415.23
-  strike_price: 5500
+  spot_price: 715.00
+  strike_price: 725
   days_to_expiration: 90
   risk_free_rate: 0.045
   volatility: 0.1845
   dividend_yield: 0.015
-  barrier_level: 4873.71
+  barrier_level: 645.00
+  barrier_type: down_and_out
 
 output:
   report_format: html

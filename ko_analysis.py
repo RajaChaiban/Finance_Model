@@ -58,8 +58,8 @@ manual_put, vanilla_put, put_adj = black_scholes_knockout(
     spot_price, strike_price, barrier_put, risk_free_rate, annual_volatility,
     time_to_expiration, 'put', dividend_yield)
 
-# METHOD 2: GS QUANT STYLE
-def gs_quant_barrier_pricer(spot, strike, barrier, r, q, sigma, T, option_type='call'):
+# METHOD 2: ALTERNATE BLACK-SCHOLES (different arg order, same math)
+def alt_barrier_pricer(spot, strike, barrier, r, q, sigma, T, option_type='call'):
     d1 = (np.log(spot/strike) + (r - q + 0.5*sigma**2)*T) / (sigma*np.sqrt(T))
     d2 = d1 - sigma*np.sqrt(T)
 
@@ -73,10 +73,10 @@ def gs_quant_barrier_pricer(spot, strike, barrier, r, q, sigma, T, option_type='
     barrier_price = vanilla * barrier_adj
     return barrier_price, vanilla, barrier_adj
 
-gs_call, gs_vanilla_call, gs_call_adj = gs_quant_barrier_pricer(
+gs_call, gs_vanilla_call, gs_call_adj = alt_barrier_pricer(
     spot_price, strike_price, barrier_call, risk_free_rate, dividend_yield,
     annual_volatility, time_to_expiration, 'call')
-gs_put, gs_vanilla_put, gs_put_adj = gs_quant_barrier_pricer(
+gs_put, gs_vanilla_put, gs_put_adj = alt_barrier_pricer(
     spot_price, strike_price, barrier_put, risk_free_rate, dividend_yield,
     annual_volatility, time_to_expiration, 'put')
 
@@ -99,15 +99,15 @@ put_down, _, _ = black_scholes_knockout(spot_price - epsilon_price, strike_price
                                         risk_free_rate, annual_volatility, time_to_expiration, 'put', dividend_yield)
 manual_put_delta = (put_up - put_down) / (2 * epsilon_price)
 
-gs_call_up, _, _ = gs_quant_barrier_pricer(spot_price + epsilon_price, strike_price, barrier_call,
+gs_call_up, _, _ = alt_barrier_pricer(spot_price + epsilon_price, strike_price, barrier_call,
                                            risk_free_rate, dividend_yield, annual_volatility, time_to_expiration, 'call')
-gs_call_down, _, _ = gs_quant_barrier_pricer(spot_price - epsilon_price, strike_price, barrier_call,
+gs_call_down, _, _ = alt_barrier_pricer(spot_price - epsilon_price, strike_price, barrier_call,
                                              risk_free_rate, dividend_yield, annual_volatility, time_to_expiration, 'call')
 gs_call_delta = (gs_call_up - gs_call_down) / (2 * epsilon_price)
 
-gs_put_up, _, _ = gs_quant_barrier_pricer(spot_price + epsilon_price, strike_price, barrier_put,
+gs_put_up, _, _ = alt_barrier_pricer(spot_price + epsilon_price, strike_price, barrier_put,
                                           risk_free_rate, dividend_yield, annual_volatility, time_to_expiration, 'put')
-gs_put_down, _, _ = gs_quant_barrier_pricer(spot_price - epsilon_price, strike_price, barrier_put,
+gs_put_down, _, _ = alt_barrier_pricer(spot_price - epsilon_price, strike_price, barrier_put,
                                             risk_free_rate, dividend_yield, annual_volatility, time_to_expiration, 'put')
 gs_put_delta = (gs_put_up - gs_put_down) / (2 * epsilon_price)
 
@@ -135,7 +135,7 @@ comparison = pd.DataFrame({
         f"{(manual_call/vanilla_call)*100:.2f}%",
         f"{(manual_put/vanilla_put)*100:.2f}%"
     ],
-    'GS Quant': [
+    'Alt BS': [
         f"${gs_call:.4f}",
         f"${gs_put:.4f}",
         f"{gs_call_delta:.6f}",
@@ -166,7 +166,7 @@ diffs = pd.DataFrame({
         'Call Delta Diff',
         'Put Delta Diff'
     ],
-    'GS Quant vs Manual': [
+    'Alt BS vs Manual': [
         f"${abs(gs_call - manual_call):.6f}",
         f"${abs(gs_put - manual_put):.6f}",
         f"{abs(gs_call_delta - manual_call_delta):.8f}",

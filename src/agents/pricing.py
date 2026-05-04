@@ -1,0 +1,404 @@
+"""PricingAgent — turns Candidates into PricedCandidates.
+
+Thin wrapper around `src/engines/router.route()`. No LLM. For each leg of each
+candidate it calls the right pricer + greeks function with the regime's scalar
+σ (Phase 1; vol-surface lands in Phase 2). Aggregates per-leg numbers into a
+structure-level summary and computes max-loss / max-gain / breakeven for
+analytically tractable structures.
+
+Quantity convention: leg.quantity = +1 long / -1 short (per "unit"). The
+candidate's notional_usd carries the size. Aggregated Greeks are kept in
+per-share units (matching the existing engines); USD scaling happens at
+memo time.
+"""
+
+from __future__ import annotations
+
+import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import date
+from typing import Any, List, Optional
+
+from src.engines import router
+
+from .base import AgentError, BaseAgent
+from .state import (
+    Candidate,
+    GreeksSnapshot,
+    Leg,
+    MarketRegime,
+    PricedCandidate,
+    StructureKind,
+    StructuringSession,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _convert_dividend_schedule(schedule: Optional[List]) -> Optional[List]:
+    """Convert a list of [iso_date_str, amount] pairs to [(ql.Date, amount)]
+    tuples ready for ``price_american_discrete_div_ql``.
+
+    Returns ``None`` when the input is None/empty so downstream router code
+    can use a simple truthiness check to decide between the discrete-div FDM
+    engine and the continuous-yield path.
+
+    Duplicated from ``src/api/handlers.py:_convert_dividend_schedule`` —
+    importing from the API layer would create a layering violation (agents
+    must not depend on the FastAPI surface). Keep these in sync.
+
+    Raises:
+        ValueError: malformed entry (bad ISO string, non-numeric amount, etc).
+    """
+    if not schedule:
+        return None
+    try:
+        import QuantLib as ql
+    except ImportError as exc:
+        raise ValueError(
+            "QuantLib not available; dividend_schedule requires QL"
+        ) from exc
+
+    converted = []
+    for i, entry in enumerate(schedule):
+        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+            raise ValueError(
+                f"dividend_schedule[{i}] must be [iso_date_str, amount], got {entry!r}"
+            )
+        iso, amount = entry
+        try:
+            d = date.fromisoformat(str(iso))
+        except ValueError as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] date {iso!r} is not ISO YYYY-MM-DD: {exc}"
+            ) from exc
+        try:
+            amt = float(amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"dividend_schedule[{i}] amount {amount!r} is not numeric: {exc}"
+            ) from exc
+        converted.append((ql.Date(d.day, d.month, d.year), amt))
+    return converted
+
+
+class PricingAgent(BaseAgent):
+    name = "PricingAgent"
+
+    def __init__(self, mi: Optional[Any] = None) -> None:
+        self.mi = mi
+
+    def _run(self, session: StructuringSession) -> StructuringSession:
+        if not session.candidates:
+            raise AgentError("No candidates to price.")
+        if session.regime is None:
+            raise AgentError("Cannot price without a MarketRegime.")
+
+        # Forward the (optional) BlackVolTermStructureHandle the orchestrator
+        # built when ``session.use_vol_surface`` was on. None preserves the
+        # scalar-σ path used by every existing test/caller.
+        vol_handle = getattr(session, "vol_handle", None)
+
+        priced: list[PricedCandidate] = []
+        for cand in session.candidates:
+            priced.append(self._price_candidate(cand, session.regime, vol_handle))
+
+        session.priced = priced
+
+        # Pricing's RAG hook runs AFTER the QuantLib model price. The point
+        # is to overlay a market-spread narrative on the model number — the
+        # corpus tells us where comparable structures recently printed.
+        self._enrich_with_pricing_context(session, priced)
+
+        return session
+
+    # ------------------------------------------------------------------
+    # Market intelligence (per-candidate pricing benchmark)
+    # ------------------------------------------------------------------
+
+    def _enrich_with_pricing_context(
+        self,
+        session: StructuringSession,
+        priced: list[PricedCandidate],
+    ) -> None:
+        if self.mi is None or session.objective is None or not priced:
+            return
+        underlying = session.objective.underlying
+
+        # Per-candidate MI calls run in parallel — each is an I/O-bound LLM
+        # round-trip (1-3s typical, occasionally 30s+ under retries). With 3
+        # candidates, sequential = ~10s best, ~90s+ worst; 3-worker thread
+        # pool collapses that to the longest single call. Order of recording
+        # is preserved so the memo's citation list stays deterministic.
+        def _query(pc: PricedCandidate):
+            return pc, self.mi.query_pricing(
+                asset_class=underlying,
+                tranche_type=pc.candidate.kind.value,
+                deal_size=pc.candidate.notional_usd,
+                collateral_info={
+                    "structure_kind": pc.candidate.kind.value,
+                    "horizon_days": session.objective.horizon_days,
+                },
+            )
+
+        results: dict[str, Any] = {}  # candidate_id -> qr
+        with ThreadPoolExecutor(max_workers=min(len(priced), 3)) as pool:
+            futures = {pool.submit(_query, pc): pc for pc in priced}
+            for fut in as_completed(futures):
+                pc = futures[fut]
+                try:
+                    _, qr = fut.result()
+                    results[pc.candidate.candidate_id] = qr
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Pricing MI query_pricing failed for %s: %s",
+                        pc.candidate.candidate_id,
+                        exc,
+                    )
+
+        # Record in original priced[] order — concurrent completion shuffles
+        # ``as_completed``, but the memo expects the citation list to follow
+        # the canonical candidate ordering.
+        for pc in priced:
+            qr = results.get(pc.candidate.candidate_id)
+            if qr is not None:
+                self._record_market_context(session, intent="pricing", qr=qr)
+
+    # ------------------------------------------------------------------
+    # Per-candidate
+    # ------------------------------------------------------------------
+
+    def _price_candidate(
+        self,
+        cand: Candidate,
+        regime: MarketRegime,
+        vol_handle: Optional[Any] = None,
+    ) -> PricedCandidate:
+        sigma = self._pick_sigma(regime)
+
+        per_leg_prices: list[float] = []
+        net_price_per_unit = 0.0  # signed sum across legs, per-share units
+        net_greeks = GreeksSnapshot()
+        method_label = ""
+        feasibility_notes: list[str] = []
+        feasible = True
+
+        for leg in cand.legs:
+            try:
+                price, greeks, method = self._price_leg(leg, regime, sigma, vol_handle)
+            except Exception as exc:  # noqa: BLE001 — engine boundary
+                feasible = False
+                feasibility_notes.append(
+                    f"Engine failure on {leg.option_type} K={leg.strike}: {exc}"
+                )
+                continue
+
+            per_leg_prices.append(price)
+            net_price_per_unit += leg.quantity * price
+            net_greeks.delta += leg.quantity * float(greeks.get("delta", 0.0))
+            net_greeks.gamma += leg.quantity * float(greeks.get("gamma", 0.0))
+            net_greeks.vega += leg.quantity * float(greeks.get("vega", 0.0))
+            net_greeks.theta += leg.quantity * float(greeks.get("theta", 0.0))
+            rho = float(greeks.get("rho", 0.0))
+            net_greeks.rho += leg.quantity * rho
+            method_label = method  # last engine wins; usually all legs share
+
+        # Apply hedging-cost premium (bps of notional, signed only on debit side).
+        if cand.hedging_cost_premium_bps and net_price_per_unit > 0:
+            adj = (cand.hedging_cost_premium_bps / 10000.0) * regime.spot
+            net_price_per_unit += adj
+
+        # USD net premium = net_price_per_unit * (notional / spot)
+        scale = cand.notional_usd / regime.spot if regime.spot > 0 else 0.0
+        net_premium_usd = net_price_per_unit * scale
+        net_premium_bps = (net_price_per_unit / regime.spot * 10000.0) if regime.spot > 0 else 0.0
+
+        # DV01 = rho per 1bp (rho is per 1% by convention -> /100).
+        net_greeks.dv01 = net_greeks.rho / 100.0
+
+        max_loss, max_gain, breakeven = self._summary_pnl(
+            cand, regime, net_price_per_unit
+        )
+
+        return PricedCandidate(
+            candidate=cand,
+            net_premium=net_premium_usd,
+            net_premium_bps=net_premium_bps,
+            greeks=net_greeks,
+            per_leg_prices=per_leg_prices,
+            method_label=method_label,
+            max_loss_usd=max_loss * scale if max_loss is not None else None,
+            max_gain_usd=max_gain * scale if max_gain is not None else None,
+            breakeven=breakeven,
+            feasible=feasible,
+            feasibility_notes=feasibility_notes,
+        )
+
+    # ------------------------------------------------------------------
+    # Per-leg
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _price_leg(
+        leg: Leg,
+        regime: MarketRegime,
+        sigma: float,
+        vol_handle: Optional[Any] = None,
+    ) -> tuple[float, dict, str]:
+        pricer, greeks_fn, method = router.route(leg.option_type)
+        T = leg.expiry_days / 365.0
+
+        kwargs = dict(
+            S=regime.spot,
+            K=leg.strike,
+            r=regime.risk_free_rate,
+            sigma=sigma,
+            T=T,
+            q=regime.dividend_yield,
+        )
+        if leg.option_type.startswith(("knockout_", "knockin_")):
+            kwargs["barrier_level"] = leg.barrier_level
+            kwargs["monitoring"] = leg.barrier_monitoring
+        if leg.option_type.startswith("american_") and leg.dividend_schedule:
+            kwargs["dividend_schedule"] = _convert_dividend_schedule(
+                leg.dividend_schedule
+            )
+        elif leg.dividend_schedule and not leg.option_type.startswith("american_"):
+            # Defensive: only American legs consume a discrete schedule. The
+            # parallel API-router fix logs the same warning on the API side
+            # so the two orchestration layers behave consistently.
+            logger.warning(
+                "dividend_schedule supplied on %s leg; only American legs "
+                "consume it - ignoring.",
+                leg.option_type,
+            )
+
+        # Smile-aware path (mirrors src/api/handlers.py:88-135). When the
+        # orchestrator built a ``BlackVolTermStructureHandle`` we forward it
+        # AND, for barrier products, force the FD-with-local-vol PDE — the
+        # analytic Reiner-Rubinstein engine collapses the smile to a scalar
+        # and mis-prices the knock-probability term (see architecture.md
+        # "Smile-aware pricing"). For vanillas the QL analytic engine
+        # consumes the handle directly. NOTE: greeks plumbing here is
+        # whatever the existing per-engine ``greeks_fn`` does — see the
+        # out-of-scope note in the change summary about the API layer's
+        # flat-σ-bumping pattern, which the agent flow does not (yet) mirror.
+        if vol_handle is not None:
+            kwargs["vol_handle"] = vol_handle
+            if leg.option_type.startswith(("knockout_", "knockin_")):
+                kwargs["use_local_vol_pde"] = True
+
+        price, _std_err, _paths = pricer(**kwargs)
+        greeks = greeks_fn(**kwargs)
+        return float(price), greeks, method
+
+    # ------------------------------------------------------------------
+    # Summary statistics
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pick_sigma(regime: MarketRegime) -> float:
+        if regime.atm_iv:
+            return regime.atm_iv
+        if regime.realised_vol_30d:
+            return regime.realised_vol_30d
+        if regime.realised_vol_90d:
+            return regime.realised_vol_90d
+        return 0.20  # last-ditch sane default
+
+    @staticmethod
+    def _summary_pnl(
+        cand: Candidate, regime: MarketRegime, net_price_per_unit: float
+    ) -> tuple[Optional[float], Optional[float], Optional[list[float]]]:
+        """Return (max_loss_per_unit, max_gain_per_unit, breakevens) at expiry,
+        ignoring path-dependence. None for analytically intractable structures.
+        Loss expressed as a positive number (i.e. abs value of the worst case).
+        """
+        spot = regime.spot
+        kind = cand.kind
+        legs = cand.legs
+
+        if kind == StructureKind.LONG_PUT and len(legs) == 1:
+            K = legs[0].strike
+            return net_price_per_unit, K - net_price_per_unit, [K - net_price_per_unit]
+
+        if kind == StructureKind.LONG_CALL and len(legs) == 1:
+            K = legs[0].strike
+            return net_price_per_unit, None, [K + net_price_per_unit]  # unbounded gain
+
+        if kind == StructureKind.PUT_SPREAD and len(legs) == 2:
+            longs = [l for l in legs if l.quantity > 0]
+            shorts = [l for l in legs if l.quantity < 0]
+            if len(longs) == 1 and len(shorts) == 1:
+                K_long = longs[0].strike
+                K_short = shorts[0].strike
+                width = K_long - K_short
+                return net_price_per_unit, width - net_price_per_unit, [
+                    K_long - net_price_per_unit,
+                ]
+
+        if kind in (StructureKind.COLLAR, StructureKind.ZERO_COST_COLLAR) and len(legs) == 2:
+            put_leg = next((l for l in legs if "put" in l.option_type), None)
+            call_leg = next((l for l in legs if "call" in l.option_type), None)
+            if put_leg and call_leg:
+                K_put = put_leg.strike
+                K_call = call_leg.strike
+                # Loss vs. the underlying long stock if S → K_put (worst protected).
+                # Bounded gain if S → K_call (capped).
+                max_loss = (spot - K_put) + net_price_per_unit
+                max_gain = (K_call - spot) - net_price_per_unit
+                return max_loss, max_gain, None
+
+        if kind == StructureKind.COVERED_CALL and len(legs) == 1:
+            K = legs[0].strike
+            # Loss is the long stock loss less the premium received (cap not on loss).
+            # Gain capped at K + premium.
+            return None, (K - spot) - net_price_per_unit, None
+
+        if kind == StructureKind.SHORT_STRANGLE and len(legs) == 2:
+            # Two short legs (call + put). Net price < 0 (credit) → max gain
+            # is the credit received per unit. Max loss is unbounded on the
+            # call wing. Breakevens = short strikes ± credit per side.
+            short_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity < 0), None
+            )
+            short_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity < 0), None
+            )
+            if short_call and short_put:
+                credit_per_unit = -net_price_per_unit  # positive when credit
+                # Max gain = credit; max loss = unbounded → return None
+                breakevens = [
+                    short_put.strike - credit_per_unit,
+                    short_call.strike + credit_per_unit,
+                ]
+                return None, credit_per_unit, breakevens
+
+        if kind == StructureKind.IRON_CONDOR and len(legs) == 4:
+            # Capped-loss strangle. Sort legs into the four slots.
+            short_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity < 0), None
+            )
+            long_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity > 0), None
+            )
+            short_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity < 0), None
+            )
+            long_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity > 0), None
+            )
+            if short_call and long_call and short_put and long_put:
+                credit_per_unit = -net_price_per_unit  # positive when net credit
+                wing_call = long_call.strike - short_call.strike
+                wing_put = short_put.strike - long_put.strike
+                wing_width = max(wing_call, wing_put)
+                max_gain = credit_per_unit
+                max_loss = wing_width - credit_per_unit
+                breakevens = [
+                    short_put.strike - credit_per_unit,
+                    short_call.strike + credit_per_unit,
+                ]
+                return max_loss, max_gain, breakevens
+
+        return None, None, None

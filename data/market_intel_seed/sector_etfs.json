@@ -1,0 +1,226 @@
+[
+  {
+    "id": "xle-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "XLE",
+    "as_of": "2026-02-12",
+    "content": "XLE (Energy Select SPDR) market window, Q1 2026. CAUTIOUS for sized barrier structures (>$25M) given crude-oil-driven gap risk into OPEC+ March meeting. 1M ATM IV 24.5, 3M 23.0, 6M 22.0 — modest backwardation reflecting front-end event risk. Skew elevated on the put side (25Δ RR -5.5 vol points) — investors paying for downside on oil-price shock. Listed liquidity strong on XLE within ±10% of spot; OTC pricing for institutional notional 2-3 vol points wide of listed mid. Realised 30d vol 21%, implied 2-3 vol points rich vs realised. Recommend tenor >=3M for barrier structures to dampen oil-print monitoring slippage."
+  },
+  {
+    "id": "xle-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "XLE",
+    "as_of": "2026-04-22",
+    "content": "XLE market window, Q2 2026. OPEN for vanilla and barrier structures. 1M ATM IV 22.0, 3M 21.5, 6M 21.0 — flat term structure post-OPEC+ meeting. Skew normalised to 25Δ RR -4.0 vol points. Realised 30d vol 19.5%, 90d 21.0%; implied 1.5-2 vol points rich. Recent client flow tilts to upside via call spreads on macro-reflation thesis; collar and put-spread RFQs running at normal pace. Listed liquidity excellent within ±15% of spot."
+  },
+  {
+    "id": "xlf-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "XLF",
+    "as_of": "2026-03-04",
+    "content": "XLF (Financials Select SPDR) market window, Q1 2026. OPEN for vanilla, CAUTIOUS for barriers crossing the March FOMC. 1M ATM IV 18.5, 3M 17.5, 6M 17.0 — orderly contango. Skew 25Δ RR -3.5 vol points. Realised 30d vol 15.5%, implied 2-3 vol points rich vs realised. Bank-earnings cluster mid-April creates a localised vol bump — front-month structures crossing Apr 15 should price an event-vol component of +50-100bps. Listed depth is strong within ±10% of spot."
+  },
+  {
+    "id": "xlf-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "XLF",
+    "as_of": "2026-04-28",
+    "content": "XLF market window, Q2 2026 post-bank-earnings. OPEN for all standard structures. 1M ATM IV 16.5, 3M 16.8, 6M 17.2 — modest contango, no event distortions. Skew normalised to 25Δ RR -3.0 vol points after earnings crush. Realised 30d vol 14.0%, 90d 15.5%. Investor flow tilts to put-spread defensive structures into summer NIM commentary; covered-call strategies on yield enhancement also active."
+  },
+  {
+    "id": "xlk-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "XLK",
+    "as_of": "2026-02-26",
+    "content": "XLK (Technology Select SPDR) market window, Q1 2026. CAUTIOUS for OTC notional >$30M given concentrated mega-cap tech weighting (top 5 names ~55% of fund). 1M ATM IV 22.0, 3M 21.0, 6M 20.5. Skew steeper than broad-market (25Δ RR -5.0 vol points) reflecting gamma-pinning risk around top-name earnings. Realised 30d vol 19.0%, implied 2-3 vol points rich. Barrier structures within 10% of spot carry +25-50bps gap-risk shift due to single-stock concentration."
+  },
+  {
+    "id": "xlk-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "XLK",
+    "as_of": "2026-04-29",
+    "content": "XLK market window, Q2 2026. OPEN for vanilla, CAUTIOUS for OTC barriers around the May AI-capex earnings cluster. 1M ATM IV 21.5, 3M 20.5, 6M 20.0 — slight backwardation. Skew 25Δ RR -4.5 vol points. Realised 30d vol 18.0%, 90d 19.5%. KI call structures attracting interest into the AI-capex narrative; flow biased toward long-vol upside via 110-115% barriers."
+  },
+  {
+    "id": "xlv-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "XLV",
+    "as_of": "2026-03-12",
+    "content": "XLV (Health Care Select SPDR) market window, Q1 2026. OPEN for all standard structures; defensive-sector flow steady. 1M ATM IV 14.5, 3M 14.0, 6M 13.8 — flat term structure typical of low-beta defensives. Skew 25Δ RR -2.5 vol points (broadly normal). Realised 30d vol 12.0%, implied 2 vol points rich. Listed liquidity tight within ±10% of spot. Income-oriented covered-call flow dominant; barrier flow modest."
+  },
+  {
+    "id": "xli-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "XLI",
+    "as_of": "2026-04-15",
+    "content": "XLI (Industrials Select SPDR) market window, Q2 2026. OPEN for vanilla and barrier structures. 1M ATM IV 17.0, 3M 16.8, 6M 16.5. Skew 25Δ RR -3.0 vol points. Realised 30d vol 14.5%, 90d 15.5%; implied 1.5-2 vol points rich. Cyclical-recovery thesis supports call-spread and KI-call flow; defensives rotating out of the sector. Listed liquidity strong within ±12% of spot."
+  },
+  {
+    "id": "xlp-mw-2026-q1",
+    "doc_type": "market_window",
+    "asset_class": "XLP",
+    "as_of": "2026-02-19",
+    "content": "XLP (Consumer Staples Select SPDR) market window, Q1 2026. OPEN, low-beta defensive sector. 1M ATM IV 12.5, 3M 12.5, 6M 13.0 — flat to slight contango. Skew 25Δ RR -2.0 vol points (mildest in sector ETF complex). Realised 30d vol 10.5%, implied 1.5-2 vol points rich. Income-product flow dominant — covered calls and put-write structures running heavy. Lookback and Asian structures rare given low realised vol."
+  },
+  {
+    "id": "xlu-mw-2026-q2",
+    "doc_type": "market_window",
+    "asset_class": "XLU",
+    "as_of": "2026-04-08",
+    "content": "XLU (Utilities Select SPDR) market window, Q2 2026. OPEN for vanilla, CAUTIOUS for tenor >9M given rate-sensitivity. 1M ATM IV 13.5, 3M 14.0, 6M 14.8 — contango reflecting forward rate-uncertainty. Skew 25Δ RR -2.5 vol points. Realised 30d vol 11.5%, 90d 12.0%. Yield-enhancement structures (covered calls, ratio call spreads) dominate; put-spread flow modest. Treat as rate-proxy: structures crossing FOMC dates carry rate-vol coupling not present in equity-beta sectors."
+  },
+  {
+    "id": "xle-deal-2026-q1-collar-1",
+    "doc_type": "deal",
+    "asset_class": "XLE",
+    "as_of": "2026-02-05",
+    "content": "Comparable deal — Energy-focused asset manager $40M XLE 6M zero-cost collar, long 92% put / short 110% call, both European. Indicative print -3bps net (effectively zero-cost). Vega slightly negative. Hedged via XLE listed market plus a small WTI futures overlay for residual oil-beta. Client rationale: lock in capped upside while protecting downside through OPEC+ March meeting and Q1 macro print sequence."
+  },
+  {
+    "id": "xle-deal-2026-q2-koput-1",
+    "doc_type": "deal",
+    "asset_class": "XLE",
+    "as_of": "2026-04-21",
+    "content": "Comparable deal — Family office $20M XLE 6M down-and-out put, K=ATM, B=80%, continuous monitoring. Net premium 235bps vs 410bps vanilla 6M ATM put (~43% cheaper). Trade rationale: cheap tail-hedge that disappears in benign oil regime. Hedged via vanilla 6M 80% put plus a small dynamic delta book; sector gap-risk shift +30bps applied per desk practice."
+  },
+  {
+    "id": "xlf-deal-2026-q1-putspread-1",
+    "doc_type": "deal",
+    "asset_class": "XLF",
+    "as_of": "2026-03-18",
+    "content": "Comparable deal — Pension overlay $35M XLF 3M put spread (95%/85%), European exercise. Net debit 145bps. Hedged via XLF listed market with no slippage. Client rationale: bounded financials downside hedge through Q1 earnings and FOMC, willing to forgo protection below 85% to halve premium vs outright 95% put. Sized to cover bank-allocation NAV."
+  },
+  {
+    "id": "xlf-deal-2026-q2-collar-1",
+    "doc_type": "deal",
+    "asset_class": "XLF",
+    "as_of": "2026-04-25",
+    "content": "Comparable deal — Insurance balance-sheet hedger $60M XLF 12M zero-cost collar, long 90% put / short 112% call, European. Indicative -2bps net (effectively zero-cost). Long-tenor collar tightens balance-sheet sensitivity to financial sector rotation. Hedged via listed XLF plus residual delta swap; vega cost retained ~+150 vega-bps."
+  },
+  {
+    "id": "xlk-deal-2026-q1-koput-1",
+    "doc_type": "deal",
+    "asset_class": "XLK",
+    "as_of": "2026-03-09",
+    "content": "Comparable deal — Tech-overweight hedge fund $50M XLK 6M down-and-out put, K=ATM, B=82%, continuous monitoring. Net premium 195bps vs 350bps vanilla 6M ATM put (~44% cheaper). Trade rationale: hedge concentrated mega-cap tech exposure into AI-capex earnings cluster; barrier knocks out the structure if a reflation sell-off triggers a pre-earnings drawdown. Hedged with vanilla 6M 82% put plus dynamic delta."
+  },
+  {
+    "id": "xlk-deal-2026-q2-kicall-1",
+    "doc_type": "deal",
+    "asset_class": "XLK",
+    "as_of": "2026-04-30",
+    "content": "Comparable deal — Macro fund $30M XLK 6M up-and-in call, K=ATM, B=112%, continuous monitoring. Net premium 95bps vs 280bps vanilla 6M ATM call (~66% cheaper). Client motivation: pay only if AI-capex melt-up scenario triggers above 112%; otherwise lose option. Hedged via XLK listed call calendar plus dynamic delta book."
+  },
+  {
+    "id": "xlv-deal-2026-q1-putspread-1",
+    "doc_type": "deal",
+    "asset_class": "XLV",
+    "as_of": "2026-02-26",
+    "content": "Comparable deal — Endowment $25M XLV 3M put spread (97%/90%), European. Net debit 115bps. Used as defensive overlay during a healthcare-policy uncertainty window. Hedged via listed XLV with no slippage; tight sector liquidity within ±10% of spot supports compact wing structures."
+  },
+  {
+    "id": "xli-deal-2026-q2-asian-1",
+    "doc_type": "deal",
+    "asset_class": "XLI",
+    "as_of": "2026-04-17",
+    "content": "Comparable deal — Corporate treasury $20M XLI 9M Asian call, daily averaging over the final 60 trading days, K=ATM. Net premium 215bps vs 295bps for 9M ATM vanilla European call (~27% cheaper). Treasury used as overlay on a 9-month industrial-equity-linked compensation accrual; averaging dampens path-dependent payout risk vs vanilla."
+  },
+  {
+    "id": "xlu-deal-2026-q1-coveredcall-1",
+    "doc_type": "deal",
+    "asset_class": "XLU",
+    "as_of": "2026-03-03",
+    "content": "Comparable deal — Yield-enhancement mandate $45M XLU 3M covered-call overlay, short 105% call, European. Premium received 90bps. Pairs with delta-one XLU long position; total yield pickup ~360bps annualised on top of dividend distribution. Hedged via desk inventory rolling vega offset; pin-risk minimal given mid-OTM strike."
+  },
+  {
+    "id": "xlp-deal-2026-q1-putwrite-1",
+    "doc_type": "deal",
+    "asset_class": "XLP",
+    "as_of": "2026-02-23",
+    "content": "Comparable deal — Insurance income mandate $30M XLP 3M put-write overlay, short 95% put, European. Premium received 65bps. Strategy structurally short-vol on a low-realised defensive sector; willingness to take delivery at 95% reflects strategic underweight desire to top up. Hedged via desk inventory; minimal ongoing rebalancing required."
+  },
+  {
+    "id": "xle-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLE",
+    "as_of": "2026-03-15",
+    "content": "Pricing benchmark — Q1 2026 XLE reference levels. 3M ATM call 295bps of spot, 3M ATM put 280bps. 3M 95% put 215bps, 3M 90% put 155bps. 3M ko_put 80% barrier 175bps. 3M ki_call 110% barrier 110bps. 6M ATM straddle 580bps. Realised 30d vol 21%, 90d 22.5%; implied 2-3 vol points rich vs realised. Hedging-cost premium 10-20bps for OTC barrier structures within 10% of spot."
+  },
+  {
+    "id": "xle-pb-2026-q2",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLE",
+    "as_of": "2026-04-29",
+    "content": "Pricing benchmark — Q2 2026 XLE reference levels post-OPEC+. 3M ATM call 270bps, 3M ATM put 255bps. 3M 95% put 195bps, 3M 90% put 140bps. 3M ko_put 82% barrier 160bps. 3M ki_call 108% barrier 95bps. 6M ATM straddle 540bps. Realised 30d vol 19.5%, 90d 21%; implied running 1.5-2 vol points rich vs realised."
+  },
+  {
+    "id": "xlf-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLF",
+    "as_of": "2026-03-19",
+    "content": "Pricing benchmark — Q1 2026 XLF reference levels. 3M ATM call 215bps, 3M ATM put 200bps. 3M 95% put 145bps, 3M 90% put 100bps. 3M ko_put 85% barrier 125bps. 6M ATM straddle 420bps. Realised 30d vol 15.5%, 90d 16%; implied 1.5-2.5 vol points rich. Bank-earnings event-vol bump adds +50-100bps to front-month structures crossing Apr 15."
+  },
+  {
+    "id": "xlk-pb-2026-q2",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLK",
+    "as_of": "2026-04-28",
+    "content": "Pricing benchmark — Q2 2026 XLK reference levels. 3M ATM call 260bps, 3M ATM put 250bps. 3M 95% put 185bps, 3M 90% put 135bps. 3M ko_put 82% barrier 150bps. 3M ki_call 110% barrier 85bps. 6M ATM straddle 510bps. Realised 30d vol 18%, 90d 19.5%; implied 2-3 vol points rich vs realised."
+  },
+  {
+    "id": "xlv-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLV",
+    "as_of": "2026-03-13",
+    "content": "Pricing benchmark — Q1 2026 XLV reference levels. 3M ATM call 165bps, 3M ATM put 160bps. 3M 95% put 110bps, 3M 90% put 70bps. 3M ko_put 88% barrier 95bps. 6M ATM straddle 320bps. Realised 30d vol 12%, 90d 13%; implied 1.5-2 vol points rich. Defensive-sector liquidity is tightest of the sector ETF complex within ±5% of spot."
+  },
+  {
+    "id": "xlu-pb-2026-q2",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLU",
+    "as_of": "2026-04-21",
+    "content": "Pricing benchmark — Q2 2026 XLU reference levels. 3M ATM call 155bps, 3M ATM put 150bps. 3M 95% put 100bps, 3M 105% call 90bps. 3M ko_put 88% barrier 80bps. 6M ATM straddle 305bps. Realised 30d vol 11.5%, 90d 12%; implied 1.5 vol points rich. Rate-sensitivity adds residual vega exposure for tenor >6M not present in pure equity-beta sectors."
+  },
+  {
+    "id": "xly-pb-2026-q1",
+    "doc_type": "pricing_benchmark",
+    "asset_class": "XLY",
+    "as_of": "2026-03-26",
+    "content": "Pricing benchmark — Q1 2026 XLY (Consumer Discretionary SPDR) reference levels. 3M ATM call 235bps, 3M ATM put 225bps. 3M 95% put 165bps, 3M 90% put 115bps. 3M ko_put 83% barrier 140bps. 6M ATM straddle 470bps. Realised 30d vol 17.5%, 90d 18.5%; implied 1.5-2 vol points rich. Consumer-cyclical concentration drives top-2-name (~30% weight) idiosyncratic risk into earnings windows."
+  },
+  {
+    "id": "general-sector-rotation-2026",
+    "doc_type": "general",
+    "asset_class": "XLE",
+    "as_of": "2026-04-10",
+    "content": "Practitioner note — Sector-rotation flows in early 2026 favour cyclicals (XLE, XLI, XLF, XLB) over defensives (XLP, XLU, XLV) on macro-reflation thesis. Structuring desks see this in collar-skew asymmetry: cyclical sector collars print closer to symmetric (90%/110%) while defensive sector collars skew tight (92%/107%) reflecting muted upside expectations. Validator should check sector-direction consistency with macro context before approving call-heavy cyclical structures."
+  },
+  {
+    "id": "general-oil-equity-correlation",
+    "doc_type": "general",
+    "asset_class": "XLE",
+    "as_of": "2026-03-22",
+    "content": "Practitioner note — XLE realised correlation to WTI front-month futures runs 0.65-0.80 over 90d windows; spikes toward 0.90 during oil supply shocks. Implication for hedging: XLE barrier structures sized >$50M typically require an oil-futures overlay of 15-25% notional to neutralise residual oil-beta during the hedging unwind. Quanto-style XLE structures denominated in non-USD carry an additional FX-oil correlation premium of 1-2 vol points."
+  },
+  {
+    "id": "general-defensive-rotation-flow",
+    "doc_type": "general",
+    "asset_class": "XLP",
+    "as_of": "2026-02-28",
+    "content": "Practitioner note — Defensive sector ETFs (XLP, XLU, XLV) attract income-product flow disproportionate to their fund size. Covered-call overlays and put-write strategies represent ~60% of OTC volume in these tickers vs ~25% for cyclicals. Vol regime: defensives realise 60-75% of broad-market vol but carry similar implied-realised premia, making them attractive structural short-vol hosts. Avoid sizing income overlays >5% of fund AUM without senior review of liquidity capacity."
+  },
+  {
+    "id": "general-sector-etf-barrier-hedging",
+    "doc_type": "general",
+    "asset_class": "XLB",
+    "as_of": "2026-04-12",
+    "content": "Practitioner note — Sector ETF (XLE/XLF/XLK/XLI/XLB/XLRE) barrier structures hedge less cleanly than SPY/QQQ due to thinner listed depth at off-ATM strikes. Standard practice: widen the hedging-cost premium by 5-10bps vs broad-market equivalent, or limit single-trade notional to <2% of average daily ETF volume. XLRE and XLB are the thinnest of the sector complex — recommend tenor >=3M and barrier distance >=10% from spot for any institutional-size barrier structure."
+  },
+  {
+    "id": "xlre-deal-2026-q2-collar-1",
+    "doc_type": "deal",
+    "asset_class": "XLRE",
+    "as_of": "2026-04-23",
+    "content": "Comparable deal — REIT-allocation manager $15M XLRE 6M zero-cost collar, long 92% put / short 108% call, European. Indicative -4bps net (effectively zero-cost). XLRE listed depth thin so structure was sized to <1.5% of 30d ADV; hedged via XLRE listed market with a small dynamic delta book and residual vega retained ~+90 vega-bps. Client rationale: hedge rate-sensitive REIT exposure through a Fed pause-then-cut window."
+  }
+]

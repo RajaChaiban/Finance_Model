@@ -1,0 +1,116 @@
+- generic [ref=e4]:
+  - generic [ref=e6]:
+    - heading "Derivatives Pricing Dashboard" [level=1] [ref=e7]
+    - paragraph [ref=e8]: Professional options pricing with real-time Greeks and risk analysis
+  - generic [ref=e10]:
+    - generic [ref=e11]:
+      - generic [ref=e12]:
+        - generic [ref=e13]: "1"
+        - generic [ref=e14]: Configure
+      - generic [ref=e16]:
+        - generic [ref=e17]: "2"
+        - generic [ref=e18]: Results
+    - generic [ref=e20]:
+      - generic [ref=e70]:
+        - heading "Pricing Results" [level=2] [ref=e71]
+        - button "✏️ New Scenario" [ref=e72] [cursor=pointer]
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - generic [ref=e75]:
+            - heading "SPY - american put" [level=3] [ref=e76]
+            - paragraph [ref=e77]: Priced on 4/27/2026, 12:15:38 PM
+          - generic [ref=e78]:
+            - button "📥 Download HTML" [ref=e79] [cursor=pointer]
+            - button "📄 Download PDF" [ref=e80] [cursor=pointer]
+            - button "✨ New Scenario" [ref=e81] [cursor=pointer]
+        - generic [ref=e83]:
+          - generic [ref=e84]:
+            - heading "Option Pricing Report" [level=1] [ref=e85]
+            - paragraph [ref=e86]: Generated on April 27, 2026 at 12:15:38
+          - generic [ref=e87]:
+            - generic [ref=e88]:
+              - heading "Option Type" [level=3] [ref=e89]
+              - generic [ref=e90]: american put
+            - generic [ref=e91]:
+              - heading "Underlying" [level=3] [ref=e92]
+              - generic [ref=e93]: SPY
+            - generic [ref=e94]:
+              - heading "Strike Price" [level=3] [ref=e95]
+              - generic [ref=e96]: $714.00
+            - generic [ref=e97]:
+              - heading "Days to Expiration" [level=3] [ref=e98]
+              - generic [ref=e99]: "90"
+          - generic [ref=e100]:
+            - heading "Option Price" [level=3] [ref=e101]
+            - paragraph [ref=e102]:
+              - strong [ref=e103]: $15.9029
+          - generic [ref=e104]:
+            - heading "Greeks (Risk Sensitivities)" [level=2] [ref=e105]
+            - table [ref=e106]:
+              - rowgroup [ref=e107]:
+                - row "Greek Value Interpretation" [ref=e108]:
+                  - columnheader "Greek" [ref=e109]
+                  - columnheader "Value" [ref=e110]
+                  - columnheader "Interpretation" [ref=e111]
+                - row "DELTA -0.4659 Price change per $1 move in underlying" [ref=e112]:
+                  - cell "DELTA" [ref=e113]:
+                    - strong [ref=e114]: DELTA
+                  - cell "-0.4659" [ref=e115]
+                  - cell "Price change per $1 move in underlying" [ref=e116]
+                - row "GAMMA 0.009474 Delta sensitivity (convexity)" [ref=e117]:
+                  - cell "GAMMA" [ref=e118]:
+                    - strong [ref=e119]: GAMMA
+                  - cell "0.009474" [ref=e120]
+                  - cell "Delta sensitivity (convexity)" [ref=e121]
+                - row "VEGA 1.3887 Price change per 1% volatility move" [ref=e122]:
+                  - cell "VEGA" [ref=e123]:
+                    - strong [ref=e124]: VEGA
+                  - cell "1.3887" [ref=e125]
+                  - cell "Price change per 1% volatility move" [ref=e126]
+                - row "THETA -0.0794 Daily time decay" [ref=e127]:
+                  - cell "THETA" [ref=e128]:
+                    - strong [ref=e129]: THETA
+                  - cell "-0.0794" [ref=e130]
+                  - cell "Daily time decay" [ref=e131]
+                - row "RHO -0.6543 Price sensitivity to interest rates" [ref=e132]:
+                  - cell "RHO" [ref=e133]:
+                    - strong [ref=e134]: RHO
+                  - cell "-0.6543" [ref=e135]
+                  - cell "Price sensitivity to interest rates" [ref=e136]
+          - generic [ref=e137]:
+            - heading "Pricing Parameters" [level=2] [ref=e138]
+            - table [ref=e139]:
+              - rowgroup [ref=e140]:
+                - row "Parameter Value" [ref=e141]:
+                  - columnheader "Parameter" [ref=e142]
+                  - columnheader "Value" [ref=e143]
+                - row "Spot Price $713.59" [ref=e144]:
+                  - cell "Spot Price" [ref=e145]:
+                    - strong [ref=e146]: Spot Price
+                  - cell "$713.59" [ref=e147]
+                - row "Strike Price $714.00" [ref=e148]:
+                  - cell "Strike Price" [ref=e149]:
+                    - strong [ref=e150]: Strike Price
+                  - cell "$714.00" [ref=e151]
+                - row "Volatility 12.49%" [ref=e152]:
+                  - cell "Volatility" [ref=e153]:
+                    - strong [ref=e154]: Volatility
+                  - cell "12.49%" [ref=e155]
+                - row "Risk-Free Rate 3.58%" [ref=e156]:
+                  - cell "Risk-Free Rate" [ref=e157]:
+                    - strong [ref=e158]: Risk-Free Rate
+                  - cell "3.58%" [ref=e159]
+                - row "Dividend Yield 1.14%" [ref=e160]:
+                  - cell "Dividend Yield" [ref=e161]:
+                    - strong [ref=e162]: Dividend Yield
+                  - cell "1.14%" [ref=e163]
+                - row "Time to Expiration 90 days (0.2466 years)" [ref=e164]:
+                  - cell "Time to Expiration" [ref=e165]:
+                    - strong [ref=e166]: Time to Expiration
+                  - cell "90 days (0.2466 years)" [ref=e167]
+          - generic [ref=e168]:
+            - paragraph [ref=e169]: "Pricing Method: QuantLib (American, Binomial Tree)"
+            - paragraph [ref=e170]: This report is for informational purposes only and not financial advice.
+  - contentinfo [ref=e67]:
+    - paragraph [ref=e68]: Built for traders and quants • Powered by QuantLib and Monte Carlo
+    - paragraph [ref=e69]: Monday, April 27, 2026

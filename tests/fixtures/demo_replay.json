@@ -1,0 +1,18 @@
+{
+  "_comment": "Canned LLM responses for DEMO_REPLAY=1. Each top-level key is `<AgentName>:<call_label>` matching the replay_key passed by the agent. When a key is missing, the LLMClient returns an empty result and the agent falls back to its deterministic path.",
+
+  "IntakeAgent:nl": {
+    "text": "{\"underlying\":\"SPY\",\"notional_usd\":50000000,\"shares\":null,\"avg_cost\":null,\"view\":\"bearish\",\"horizon_days\":240,\"budget_bps_notional\":100,\"premium_tolerance\":\"low\",\"capped_upside_ok\":true,\"barrier_appetite\":false,\"hedge_target_loss_pct\":null,\"constraints\":[],\"clarifications_needed\":[]}",
+    "stop_reason": "end_turn"
+  },
+
+  "StrategistAgent:polish": {
+    "text": "{\"candidates\":[]}",
+    "stop_reason": "end_turn"
+  },
+
+  "NarratorAgent:memo": {
+    "text": "{\"title\":\"Internal RFQ — SPY Downside Protection (8m)\",\"objective_restatement\":\"Client holds $50M SPY and wants downside protection over an 8-month horizon, premium budget around 100bps of notional, willing to cap upside above 8%.\",\"per_candidate_prose\":[],\"recommendation\":{\"candidate_id\":\"\",\"paragraph\":\"\"},\"caveats\":[\"Indicative only; subject to dealer confirmation and live market.\"]}",
+    "stop_reason": "end_turn"
+  }
+}
