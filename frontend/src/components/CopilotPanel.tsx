@@ -411,41 +411,383 @@ function CandidateCard({
 }
 
 function MemoView({ memo, session }: { memo: any; session: SessionView }) {
+  const [showReport, setShowReport] = useState(false);
+
+  const verdict = parseVerdict(memo.title);
+  const split = parseRecommendation(memo.recommendation_md || "");
+  const citationsCount = split.citations.length;
+  const dealsCount = split.deals.length;
+  const caveatsCount = memo.caveats?.length || 0;
+
   return (
     <div className="memo-view">
-      <h4>{memo.title}</h4>
-      <p>{memo.objective_restatement}</p>
-      <pre className="memo-comparison">{memo.comparison_table_md}</pre>
-      <div className="memo-recommendation">
-        <strong>Recommendation:</strong>
-        <p>{memo.recommendation_md}</p>
+      <div className="memo-header-row">
+        <div className="memo-header-text">
+          <div className="memo-eyebrow">VERDICT</div>
+          <h4 className="memo-verdict-headline">{verdict.recommendation || memo.title}</h4>
+          {verdict.justification && (
+            <p className="memo-verdict-sub">{verdict.justification}</p>
+          )}
+        </div>
+        <button
+          type="button"
+          className="memo-report-button"
+          onClick={() => setShowReport(true)}
+          aria-label="Open full memo report"
+        >
+          📄 View Full Report
+        </button>
       </div>
-      {memo.caveats && memo.caveats.length > 0 && (
-        <ul className="memo-caveats">
-          {memo.caveats.map((c: string, i: number) => (
-            <li key={i}>⚠️ {c}</li>
-          ))}
-        </ul>
+      <div className="memo-quick-stats">
+        <span className="memo-stat-pill">📊 {memo.term_sheets?.length || 0} candidates</span>
+        <span className="memo-stat-pill">📚 {citationsCount} MI citations</span>
+        <span className="memo-stat-pill">📅 {dealsCount} comparable deals</span>
+        <span className="memo-stat-pill memo-stat-pill-warn">⚠️ {caveatsCount} caveats</span>
+      </div>
+
+      {showReport && (
+        <MemoModal
+          memo={memo}
+          session={session}
+          verdict={verdict}
+          split={split}
+          onClose={() => setShowReport(false)}
+        />
       )}
-      <details className="memo-termsheets">
-        <summary>Term-sheet snippets</summary>
-        {memo.term_sheets.map((t: any, i: number) => (
-          <pre key={i} className="termsheet">{t.text}</pre>
-        ))}
-      </details>
-      {session.validator?.findings && session.validator.findings.length > 0 && (
-        <details className="memo-validator">
-          <summary>Validator findings ({session.validator.findings.length})</summary>
-          <ul>
-            {session.validator.findings.map((f: any, i: number) => (
-              <li key={i}>
-                <strong>{f.severity}:</strong> {f.message}
-                {f.remediation && <em> — {f.remediation}</em>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+    </div>
+  );
+}
+
+// ----- Memo modal: structured full report -----
+
+type ParsedVerdict = { recommendation: string; justification: string };
+type Citation = {
+  agent: string;
+  intent: string;
+  confidence: string;
+  sources: string[];
+  text: string;
+};
+type Deal = {
+  number: string;
+  id: string;
+  asset: string;
+  asOf: string;
+  lag: string;
+  snippet: string;
+};
+type SplitRec = {
+  recommendation: string;
+  citations: Citation[];
+  deals: Deal[];
+  freshness: string | null;
+};
+
+function parseVerdict(title: string): ParsedVerdict {
+  if (!title) return { recommendation: "", justification: "" };
+  const m = title.match(/VERDICT:\s*(.+?)(?:\n|$)/);
+  const text = (m ? m[1] : title).replace(/\*\*/g, "").trim();
+  const dash = text.indexOf(" — ");
+  if (dash >= 0) {
+    return {
+      recommendation: text.slice(0, dash).trim(),
+      justification: text.slice(dash + 3).trim(),
+    };
+  }
+  return { recommendation: text, justification: "" };
+}
+
+function parseRecommendation(rawMd: string): SplitRec {
+  const citationsIdx = rawMd.indexOf("### Market Intelligence Citations");
+  const dealsIdx = rawMd.indexOf("### Recent Comparable Deals");
+  let recommendation = rawMd;
+  let citationsSection = "";
+  let dealsSection = "";
+  if (citationsIdx >= 0 && dealsIdx >= 0) {
+    recommendation = rawMd.slice(0, citationsIdx);
+    citationsSection = rawMd.slice(citationsIdx, dealsIdx);
+    dealsSection = rawMd.slice(dealsIdx);
+  } else if (citationsIdx >= 0) {
+    recommendation = rawMd.slice(0, citationsIdx);
+    citationsSection = rawMd.slice(citationsIdx);
+  } else if (dealsIdx >= 0) {
+    recommendation = rawMd.slice(0, dealsIdx);
+    dealsSection = rawMd.slice(dealsIdx);
+  }
+  return {
+    recommendation: recommendation.replace(/^Recommendation:\s*/i, "").trim(),
+    citations: parseCitations(citationsSection),
+    deals: parseDeals(dealsSection),
+    freshness: extractFreshness(dealsSection),
+  };
+}
+
+function parseCitations(section: string): Citation[] {
+  if (!section) return [];
+  const items = section.split(/\n(?=\d+\.\s)/);
+  const out: Citation[] = [];
+  for (const item of items) {
+    const m = item.match(
+      /^\d+\.\s+\*\*([^*]+)\*\*\s+\(([^,]+),\s+confidence:\s+(\w+)\)(?:\s*—\s*sources:\s*([^\n]+))?\s*\n?\s*([\s\S]*)$/,
+    );
+    if (m) {
+      const text = m[5].replace(/\s+/g, " ").trim();
+      out.push({
+        agent: m[1].trim(),
+        intent: m[2].trim(),
+        confidence: m[3].trim().toLowerCase(),
+        sources: (m[4] || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        text: text.length > 600 ? text.slice(0, 600) + "…" : text,
+      });
+    }
+  }
+  return out;
+}
+
+function parseDeals(section: string): Deal[] {
+  if (!section) return [];
+  const lines = section.split("\n").filter((l) => l.trim().startsWith("|"));
+  if (lines.length < 3) return [];
+  const out: Deal[] = [];
+  for (const line of lines.slice(2)) {
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    if (cells.length < 6) continue;
+    if (cells[0] === "…" || /more not shown/.test(cells[1])) continue;
+    out.push({
+      number: cells[0],
+      id: cells[1].replace(/`/g, ""),
+      asset: cells[2],
+      asOf: cells[3],
+      lag: cells[4],
+      snippet: cells[5],
+    });
+  }
+  return out;
+}
+
+function extractFreshness(section: string): string | null {
+  if (!section) return null;
+  const m = section.match(/_([^_]*Corpus freshness[^_]*)_/);
+  return m ? m[1].trim() : null;
+}
+
+function parseMarkdownTable(md: string): {
+  headers: string[];
+  rows: { cells: string[]; recommended: boolean }[];
+} {
+  if (!md) return { headers: [], rows: [] };
+  const lines = md.split("\n").filter((l) => l.trim().startsWith("|"));
+  if (lines.length < 3) return { headers: [], rows: [] };
+  const headers = lines[0].split("|").slice(1, -1).map((c) => c.trim());
+  const rows = lines.slice(2).map((line) => {
+    const cells = line.split("|").slice(1, -1).map((c) => c.trim());
+    const recommended = cells[0]?.includes("**>>**") ?? false;
+    const cleanCells = cells.map((c) => c.replace(/\*\*>>\*\*\s*/, "").replace(/\*\*/g, ""));
+    return { cells: cleanCells, recommended };
+  });
+  return { headers, rows };
+}
+
+function MemoModal({
+  memo,
+  session,
+  verdict,
+  split,
+  onClose,
+}: {
+  memo: any;
+  session: SessionView;
+  verdict: ParsedVerdict;
+  split: SplitRec;
+  onClose: () => void;
+}) {
+  // Esc-to-close.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const table = parseMarkdownTable(memo.comparison_table_md || "");
+
+  return (
+    <div
+      className="memo-modal-overlay"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Structuring memo full report"
+    >
+      <div className="memo-modal" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="memo-modal-close"
+          onClick={onClose}
+          aria-label="Close report"
+        >
+          ✕
+        </button>
+
+        <header className="memo-modal-hero">
+          <div className="memo-modal-eyebrow">3-Way Structuring Memo</div>
+          <h1 className="memo-modal-verdict">{verdict.recommendation}</h1>
+          {verdict.justification && (
+            <p className="memo-modal-subtitle">{verdict.justification}</p>
+          )}
+        </header>
+
+        <section className="memo-modal-section">
+          <h2>Client Objective</h2>
+          <p className="memo-modal-objective">{memo.objective_restatement}</p>
+        </section>
+
+        {table.rows.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>3-Way Comparison</h2>
+            <div className="memo-modal-table-wrap">
+              <table className="memo-modal-comparison-table">
+                <thead>
+                  <tr>
+                    {table.headers.map((h, i) => (
+                      <th key={i}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.map((row, i) => (
+                    <tr key={i} className={row.recommended ? "recommended" : ""}>
+                      {row.cells.map((cell, j) => (
+                        <td key={j}>{cell}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="memo-modal-table-legend">
+              Recommended pick highlighted. Validator: OK = clean / WARN = warning / BLOCK = blocker.
+            </p>
+          </section>
+        )}
+
+        {split.recommendation && (
+          <section className="memo-modal-section">
+            <h2>Analyst Recommendation</h2>
+            <p className="memo-modal-recommendation">{split.recommendation}</p>
+          </section>
+        )}
+
+        {memo.caveats && memo.caveats.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>Caveats ({memo.caveats.length})</h2>
+            <ul className="memo-modal-caveats">
+              {memo.caveats.map((c: string, i: number) => (
+                <li key={i}>{c}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {split.citations.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>Market Intelligence Citations ({split.citations.length})</h2>
+            <div className="memo-modal-citations">
+              {split.citations.map((cit, i) => (
+                <div className="memo-modal-citation" key={i}>
+                  <div className="memo-modal-citation-header">
+                    <strong>{i + 1}. {cit.agent}</strong>
+                    <span className="memo-modal-chip">{cit.intent}</span>
+                    <span
+                      className={`memo-modal-confidence memo-modal-confidence-${cit.confidence}`}
+                    >
+                      {cit.confidence}
+                    </span>
+                  </div>
+                  {cit.sources.length > 0 && (
+                    <div className="memo-modal-sources">
+                      {cit.sources.map((s) => (
+                        <code key={s}>{s}</code>
+                      ))}
+                    </div>
+                  )}
+                  <p>{cit.text}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {split.deals.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>Recent Comparable Deals</h2>
+            {split.freshness && (
+              <p className="memo-modal-freshness">{split.freshness}</p>
+            )}
+            <div className="memo-modal-table-wrap">
+              <table className="memo-modal-deals-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Source ID</th>
+                    <th>Asset</th>
+                    <th>As Of</th>
+                    <th>Lag</th>
+                    <th>Snippet</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {split.deals.map((d, i) => (
+                    <tr key={i}>
+                      <td>{d.number}</td>
+                      <td><code>{d.id}</code></td>
+                      <td>{d.asset}</td>
+                      <td>{d.asOf}</td>
+                      <td>{d.lag}</td>
+                      <td className="memo-modal-snippet-cell">{d.snippet}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {memo.term_sheets && memo.term_sheets.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>Term Sheets</h2>
+            <div className="memo-modal-termsheets">
+              {memo.term_sheets.map((t: any, i: number) => (
+                <details key={i}>
+                  <summary>Term sheet {i + 1} — <code>{t.candidate_id}</code></summary>
+                  <pre>{t.text}</pre>
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {session.validator?.findings && session.validator.findings.length > 0 && (
+          <section className="memo-modal-section">
+            <h2>Validator Findings ({session.validator.findings.length})</h2>
+            <ul className="memo-modal-validator-list">
+              {session.validator.findings.map((f: any, i: number) => (
+                <li key={i} data-severity={f.severity}>
+                  <span className="memo-modal-severity">{f.severity}</span>
+                  <div>
+                    <strong>{f.message}</strong>
+                    {f.remediation && <em> — {f.remediation}</em>}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
