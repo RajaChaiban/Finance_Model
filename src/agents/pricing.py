@@ -355,4 +355,50 @@ class PricingAgent(BaseAgent):
             # Gain capped at K + premium.
             return None, (K - spot) - net_price_per_unit, None
 
+        if kind == StructureKind.SHORT_STRANGLE and len(legs) == 2:
+            # Two short legs (call + put). Net price < 0 (credit) → max gain
+            # is the credit received per unit. Max loss is unbounded on the
+            # call wing. Breakevens = short strikes ± credit per side.
+            short_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity < 0), None
+            )
+            short_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity < 0), None
+            )
+            if short_call and short_put:
+                credit_per_unit = -net_price_per_unit  # positive when credit
+                # Max gain = credit; max loss = unbounded → return None
+                breakevens = [
+                    short_put.strike - credit_per_unit,
+                    short_call.strike + credit_per_unit,
+                ]
+                return None, credit_per_unit, breakevens
+
+        if kind == StructureKind.IRON_CONDOR and len(legs) == 4:
+            # Capped-loss strangle. Sort legs into the four slots.
+            short_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity < 0), None
+            )
+            long_call = next(
+                (l for l in legs if "call" in l.option_type and l.quantity > 0), None
+            )
+            short_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity < 0), None
+            )
+            long_put = next(
+                (l for l in legs if "put" in l.option_type and l.quantity > 0), None
+            )
+            if short_call and long_call and short_put and long_put:
+                credit_per_unit = -net_price_per_unit  # positive when net credit
+                wing_call = long_call.strike - short_call.strike
+                wing_put = short_put.strike - long_put.strike
+                wing_width = max(wing_call, wing_put)
+                max_gain = credit_per_unit
+                max_loss = wing_width - credit_per_unit
+                breakevens = [
+                    short_put.strike - credit_per_unit,
+                    short_call.strike + credit_per_unit,
+                ]
+                return max_loss, max_gain, breakevens
+
         return None, None, None

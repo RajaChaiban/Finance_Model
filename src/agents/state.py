@@ -70,6 +70,8 @@ class StructureKind(str, Enum):
     COVERED_CALL = "covered_call"
     RISK_REVERSAL = "risk_reversal"
     PUT_SPREAD_COLLAR = "put_spread_collar"
+    SHORT_STRANGLE = "short_strangle"
+    IRON_CONDOR = "iron_condor"
 
 
 # ---------------------------------------------------------------------------
