@@ -1,0 +1,66 @@
+{
+  "hash": "6b4c1ad7",
+  "configHash": "764469c7",
+  "lockfileHash": "33cd6973",
+  "browserHash": "54830f77",
+  "optimized": {
+    "html2canvas": {
+      "src": "../../node_modules/html2canvas/dist/html2canvas.js",
+      "file": "html2canvas.js",
+      "fileHash": "6e984f05",
+      "needsInterop": true
+    },
+    "jspdf": {
+      "src": "../../node_modules/jspdf/dist/jspdf.es.min.js",
+      "file": "jspdf.js",
+      "fileHash": "ecb42e19",
+      "needsInterop": false
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "3c127f9f",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "742cd4fe",
+      "needsInterop": true
+    },
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "93d77adf",
+      "needsInterop": true
+    },
+    "recharts": {
+      "src": "../../node_modules/recharts/es6/index.js",
+      "file": "recharts.js",
+      "fileHash": "033c9698",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-CYJPkc-J": {
+      "file": "chunk-CYJPkc-J.js",
+      "isDynamicEntry": false
+    },
+    "index.es-_JVkFZpR": {
+      "file": "index.es-_JVkFZpR.js",
+      "isDynamicEntry": true
+    },
+    "purify.es-BGFZ8Jmj": {
+      "file": "purify.es-BGFZ8Jmj.js",
+      "isDynamicEntry": true
+    },
+    "react-dom-BZydYmzT": {
+      "file": "react-dom-BZydYmzT.js",
+      "isDynamicEntry": false
+    },
+    "typeof-BUrs08F6": {
+      "file": "typeof-BUrs08F6.js",
+      "isDynamicEntry": false
+    }
+  }
+}
