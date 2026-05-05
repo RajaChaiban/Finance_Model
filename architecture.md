@@ -1,6 +1,6 @@
 # Architecture — ArgoPilot Platform
 
-A FastAPI + React derivatives pricing platform with QuantLib as the primary numerical engine. Four layers stack on top of the same engines: a market-intelligence layer (live indices and movers), the Quick Pricer (8 product types via REST), a 7-agent structuring co-pilot with human-in-the-loop gates, and a RAG-based market-intelligence (MI) corpus that grounds the agents' reasoning in dealer commentary, comparable term sheets, and pricing benchmarks.
+A FastAPI + React derivatives pricing platform with QuantLib as the primary numerical engine. Five layers stack on top of the same engines: a market-intelligence layer (live indices and movers), the Quick Pricer (18 product types via REST), a 7-agent structuring co-pilot with human-in-the-loop gates, a RAG-based market-intelligence (MI) corpus that grounds the agents' reasoning in dealer commentary, and a senior-structurer enrichment layer that adds XVA, bid/offer, cross-Greeks, hedge tickets, termsheets, KIDs, lifecycle re-marking, and book aggregation.
 
 ## High-level flow
 
@@ -15,6 +15,7 @@ React UI (Vite, port 5173)
     └── /api/agent/sessions   → CopilotPanel → Intake form → SSE stream
                                               → Gate A/B/C decisions
                                               → final memo + 3 priced candidates
+                                              → hedge ticket emitted on Gate C
     │
     ▼
 FastAPI app (src/api/main.py, port 8002)
@@ -30,14 +31,23 @@ FastAPI app (src/api/main.py, port 8002)
     │       ├── pricer_fn(...)  → price, std_error, paths
     │       ├── greeks_fn(...)  → {delta, gamma, vega, theta, rho, ...}
     │       │
-    │       ├── report.generator   → HTML report
-    │       └── analysis.structurer_agent → strategist commentary
+    │       ├── analysis.xva.compute_xva     → FVA + CVA + DVA overlay
+    │       ├── analysis.vanna_volga         → cross-Greeks (auto for KO/KI)
+    │       ├── bid/mid/offer derivation     → from mid + xva total
+    │       ├── surface_age stamp            → seconds since vol-surface build
+    │       ├── report.generator             → HTML report
+    │       └── analysis.structurer_agent    → strategist commentary
     │
     ├── /api/market/*   spot, dividend, rate, hist-vol, dividend-info, movers
     │       (Yahoo Finance via market_data.py + movers.py)
     │
-    └── /api/agent/*    multi-agent structuring co-pilot
+    └── /api/agent/*    multi-agent structuring co-pilot + structurer artefacts
             (src/api/agent_router.py → src/agents/orchestrator.py)
+            • /sessions/{id}/termsheet      reportlab PDF
+            • /sessions/{id}/kid            PRIIPs KID JSON
+            • /sessions/{id}/hedge_tickets  emitted at Gate C
+            • /sessions/{id}/lifecycle      re-mark prior trade
+            • /book                         book-level aggregator
 ```
 
 ## Repository layout
@@ -46,9 +56,10 @@ FastAPI app (src/api/main.py, port 8002)
 src/
 ├── api/                      FastAPI layer
 │   ├── main.py               App + CORS + market data + movers endpoints
-│   ├── handlers.py           price_option orchestrator
-│   ├── models.py             Pydantic request/response schemas (PricingRequest)
-│   ├── agent_router.py       /api/agent/* routes (sessions, gates, SSE)
+│   ├── handlers.py           price_option orchestrator (xva + bid/offer + vanna/volga)
+│   ├── models.py             Pydantic request/response schemas (PricingRequest, PricingResult)
+│   ├── agent_router.py       /api/agent/* routes (sessions, gates, SSE,
+│   │                          termsheet, KID, hedge_tickets, lifecycle, book)
 │   ├── agent_models.py       Pydantic schemas for agent endpoints
 │   └── market_data.py        Yahoo Finance adapters (option chain, retry/cache)
 │
@@ -60,41 +71,72 @@ src/
 │   ├── monte_carlo_lsm.py    Wraps ql.MCAmericanEngine (Longstaff-Schwartz)
 │   ├── asian.py              Geometric closed-form + arithmetic MC with geometric CV
 │   ├── lookback.py           Fixed-strike + floating-strike lookback (continuous)
+│   ├── digitals.py           Cash-or-nothing + asset-or-nothing + shark-fin
+│   ├── variance_swap.py      Carr-Madan log-contract replication
+│   ├── multi_asset_mc.py     Correlated GBM (Cholesky + antithetic) + worst-of put
+│   ├── autocallable.py       Phoenix autocallable MC pricer
+│   ├── reverse_convertible.py  Bond + short put composition (NOT router-wired; v2)
+│   ├── heston.py             Heston calibration shim (skeleton)
 │   └── solver.py             Implied-vol Brent / Newton solver
 │
-├── data/                     Vol-surface construction + market data
+├── data/                     Vol-surface construction + market data + curves
 │   ├── iv_grid.py            Invert option-chain quotes → IV grid
 │   ├── vol_surface.py        Build ql.BlackVarianceSurface from grid
 │   ├── rate_conventions.py   Continuous/discrete rate conversions
+│   ├── rate_curve.py         FlatRateCurve + FRED SOFR fetch
+│   ├── discounting.py        DiscountingContext (OIS + projection) — single-curve shim default
+│   ├── dividend_curve.py     Dividend-yield forecast (linear-decay)
+│   ├── correlation.py        Implied correlation (Bakshi-Kapadia-Madan)
+│   ├── fx.py                 FX vanilla (Garman-Kohlhagen) — skeleton, v2
 │   ├── market_data.py        yfinance adapters with retry/cache
 │   └── movers.py             Movers payload (gainers/losers/volatile + indices)
 │
 ├── agents/                   Multi-agent structuring co-pilot
 │   ├── state.py              Pydantic StructuringSession + all state types
+│   │                          (now includes XVAOverlayState, BidOfferQuote,
+│   │                           HedgeTicketState; new StructureKind enums)
 │   ├── base.py               Common base + AgentError + market_context helper
 │   ├── llm_client.py         Gemini SDK wrapper, cost tracking, replay mode
 │   ├── orchestrator.py       State machine + SessionStore + event queue
+│   │                          (Gate C approval triggers hedge-ticket emission)
+│   ├── persistence.py        SQLiteSessionStore (env-flag opt-in: VOL_DESK_PERSIST=1)
 │   ├── intake.py             RFQ form/NL → ClientObjective (+ MI general_query)
 │   ├── strategist.py         3 candidates (+ MI query_market_window pre-build)
 │   ├── pricing.py            Price + Greeks (+ MI query_pricing post-engine)
-│   ├── scenario.py           Outcome scenarios (+ MI general_query for history)
+│   ├── scenario.py           Outcome scenarios — uses ScenarioLibrary
+│   │                          (3 default + 3 historical: 2008, COVID, flash crash)
 │   ├── validator.py          Invariants (+ MI query_deal_analysis for outliers)
 │   ├── narrator.py           Memo (+ Market Intelligence Citations from session.market_context)
+│   ├── hedge_ticket.py       HedgeTicket builder (opening Δ/ν/Γ + listed proxies)
+│   ├── lifecycle.py          LifecycleAgent — re-mark + reshape (close/roll/enhance)
+│   ├── book.py               BookSession aggregator across StructuringSessions
 │   ├── market_intelligence.py  Self-contained RAG layer (Chroma + sentence-transformers)
 │   └── rules/strategy_rules.py   Programmatic structural rules
 │
-├── analysis/                 Single-shot strategist (legacy, used by Quick Pricer)
-│   ├── structurer_agent.py   StructurerReview class
-│   └── structurer_report.py  HTML structurer review
+├── analysis/                 Single-shot strategist (legacy) + structurer overlays
+│   ├── structurer_agent.py   StructurerReview class (legacy Quick Pricer)
+│   ├── structurer_report.py  HTML structurer review (legacy)
+│   ├── xva.py                FVA + bilateral CVA overlay
+│   ├── vanna_volga.py        Cross-Greeks via bump-and-reprice
+│   ├── vega_bucket.py        Tenor × strike vega decomposition
+│   ├── bid_list.py           Synthetic dealer bid-list (sales-tool mock)
+│   ├── pnl_explain.py        Greeks Taylor-expansion P&L attribution
+│   └── sensitivities.py      Scenario grid + gamma ladder
 │
 ├── config/
 │   ├── loader.py             YAML config + validation (PricingConfig)
-│   ├── agent_config.py       Agent layer config (model selection, cost ceiling)
+│   ├── agent_config.py       Agent layer config (model selection, per-session +
+│   │                          tenant cost ceilings)
 │   └── market_config.py      Market data env-var overrides
 │
-├── report/generator.py       HTML report rendering (Jinja2)
+├── report/
+│   ├── generator.py          HTML report rendering (Jinja2)
+│   ├── term_sheet.py         PRIIPs-style termsheet PDF (reportlab)
+│   └── kid.py                PRIIPs KID — SRI bucket, RIY, multi-horizon scenarios
+│
 ├── backtesting/              Backtest engine + reporter (CLI flow)
 ├── scenarios/                Scenario engine + reporter (CLI flow)
+│                              ScenarioLibrary now consumed by ScenarioAgent
 ├── institutional_pipeline.py Multi-config orchestration entry point
 └── solver_pipeline.py        IV solver entry point
 
@@ -147,7 +189,7 @@ docs/superpowers/
 
 `src/engines/router.py` is the single point of dispatch. Each `option_type` string maps to a `(pricer_fn, greeks_fn, method_label)` tuple. QuantLib is preferred; if `import QuantLib` fails at module load, the router falls back to pure-Python implementations.
 
-| `option_type`       | Primary engine                               | Fallback                                    |
+| `option_type`       | Primary engine                               | Fallback / notes                            |
 |---------------------|----------------------------------------------|---------------------------------------------|
 | `european_call/put` | `ql.AnalyticEuropeanEngine`                  | `black_scholes.price_european`              |
 | `american_call/put` | `ql.BinomialVanillaEngine` (LR tree)         | `monte_carlo_lsm.price_american` (QL MC)    |
@@ -155,6 +197,10 @@ docs/superpowers/
 | `knockin_call/put`  | `ql.AnalyticBarrierEngine` (DnIn/UpIn)       | KO + parity: `KI = Vanilla − KO`            |
 | `asian_call/put`    | Geometric: `ql.AnalyticDiscrete/ContinuousGeometricAveragePriceAsianEngine`. Arithmetic: MC with geometric control variate | — |
 | `lookback_call/put` | `ql.AnalyticContinuousFixed/FloatingLookbackEngine` | — |
+| `digital_call/put`  | Black-Scholes cash-or-nothing closed-form (`digitals.price_digital_cash`) | Greeks via bump-and-reprice closed-form for stability near strike |
+| `phoenix_autocall`  | `autocallable.price_phoenix_autocallable` over `multi_asset_mc.simulate_correlated_gbm` | Worst-of basket; observation schedule + autocall/coupon/protection barriers via kwargs |
+| `worst_of_call/put` | `multi_asset_mc.price_worst_of_european_put` (put) / Cholesky GBM + worst-of payoff (call) | Single-asset path collapses to vanilla |
+| `variance_swap`     | `variance_swap.fair_strike_from_strip` (Carr-Madan) | Returned "price" is the fair vol strike, not USD |
 
 ### Barrier direction & kind
 
@@ -373,27 +419,105 @@ Environment variables (see `.env.example`):
 
 ## Testing
 
-`pytest tests/` — **1202** tests, ~25s. Coverage layers:
+`pytest tests/` — **1444** tests, ~90s. Coverage layers:
 
-- **Engine correctness**: `test_quantlib_correctness.py`, `test_smile_pricing.py`, `test_knockin.py` (KO+KI=Vanilla parity), `test_combinations.py` (all 12 option types via router), `test_asian.py`, `test_lookback.py`, `test_multi_underlier_exotics.py`.
+- **Engine correctness**: `test_quantlib_correctness.py`, `test_smile_pricing.py`, `test_knockin.py` (KO+KI=Vanilla parity), `test_combinations.py` (all 12 option types via router), `test_asian.py`, `test_lookback.py`, `test_multi_underlier_exotics.py`, `test_autocallable.py`, `test_multi_asset_mc.py`.
 - **Conventions**: `test_mc_theta.py` (per-day, sign), `test_rate_conventions.py`, `test_dividend_normaliser.py`, `test_evaluation_date.py`.
 - **Numerical methods**: `test_fdm_greeks.py`, `test_mc_antithetic.py`, `test_step_count_policy.py`, `test_bgk_shift.py`, `test_discrete_monitoring.py`, `test_discrete_dividend.py`, `test_adaptive_bump.py`.
 - **Solver / IV**: `test_solver_iv_default.py`, `test_iv_grid.py`, `test_vol_surface.py`, `test_option_chain.py`.
-- **Engine consistency**: `test_engine_consistency.py`, `test_engines.py`.
+- **Engine consistency**: `test_engine_consistency.py`, `test_engines.py`, `test_engine_selection.py`.
 - **Pipeline**: `test_pipeline_with_structurer.py`, `test_market_data.py`.
-- **Agents**: `test_agents_smoke.py` (full 7-agent flow with replay fixtures).
+- **Agents**: `test_agents_smoke.py` (full 7-agent flow with replay fixtures), `test_session_persistence.py`, `test_basket_state.py`, `test_copilot_scenarios.py`.
 - **Movers**: `test_movers.py`, `test_movers_endpoint.py`.
+- **Phase-7 senior-structurer**: `test_phase7_engines.py` (26 unit tests covering digitals, var swap, RC, vega buckets, vanna/volga, hedge tickets, KID, lifecycle, book, implied correlation, dividend curve, discounting, XVA), `test_phase7_stress.py` (58 stress tests covering edge regimes, monotonicity invariants, end-to-end hedge-ticket emission, FastAPI endpoint round-trips, concurrency, random seed sweeps).
 
 E2E: `frontend/tests/pricing-pipeline.spec.ts`, `frontend/tests/vol-desk-platform.spec.ts` (Playwright).
 
 Engine priorities: parity / no-arb identities first (cross-checks engines against themselves), then closed-form references where available (Black-Scholes for European, Reiner-Rubinstein for KO, geometric Asian for arithmetic-via-CV).
 
+## Senior-structurer enrichment layer (Phase 7)
+
+The pipeline above produces a model price + Greeks. A trader cannot quote off mid alone — there's no carry, no funding charge, no capital, no hedge plan, no termsheet. The Phase-7 enrichment layer adds the artefacts that turn a price into a tradeable quote and a defensible memo.
+
+### Per-quote enrichments (attached to `PricingResult`)
+
+```
+PricingResult
+├── price                    Model mid (existing)
+├── greeks                   {delta, gamma, vega, theta, rho} (existing)
+│
+├── xva_overlay              FVA + bilateral CVA + DVA + ask/bid prices
+│                              (src/analysis/xva.py)
+│       FVA = funding_spread_bps · EPE_avg · T
+│       CVA = LGD · EPE_avg · (1 − exp(−λ_cp · T))     [λ_cp from CDS]
+│       Always 0 when the trade is CSA-protected
+│
+├── quote_bid / mid / offer  Derived from mid + xva.total_xva
+├── quote_spread_bps         Bid-offer spread in bps of mid (or strike for var swaps)
+│
+├── vanna                    ∂²V/∂S∂σ — auto-on for KO/KI; bump-and-reprice
+├── volga                    ∂²V/∂σ² — auto-on for KO/KI
+├── vega_buckets             Tenor × strike sensitivity grid (analysis/vega_bucket.py)
+│
+└── surface_age_seconds      Set when use_vol_surface=True; UI surfaces "stale" badge > 60s
+```
+
+### Agent-pipeline enrichments
+
+```
+StructuringSession (after Gate C approval)
+├── memo                     3-way comparison memo (existing)
+├── hedge_tickets            One per priced candidate, emitted at Gate C
+│                              (src/agents/hedge_ticket.py)
+│       opening_delta_shares          Shares to short/long against position
+│       opening_vega_per_pct          $ vega per 1% σ
+│       gamma_rebal_budget_per_day    0.5 · |Γ| · (σS)² · dt
+│       rebalance_frequency           daily | weekly | on-event (heuristic on |Γ|·S²)
+│       listed_proxies                Listed-strike approximations of OTC vega tilt
+│
+└── (per-candidate)
+    ├── xva                  Same XVAOverlayState as PricingResult
+    └── quote                BidOfferQuote
+```
+
+### Standalone enrichment endpoints
+
+| Endpoint | Output | Module |
+|---|---|---|
+| `GET /api/agent/sessions/{id}/termsheet` | reportlab PRIIPs-style PDF | `src/report/term_sheet.py` |
+| `GET /api/agent/sessions/{id}/kid` | JSON KID (SRI bucket, RIY cost table, multi-horizon scenarios) | `src/report/kid.py` |
+| `GET /api/agent/sessions/{id}/hedge_tickets` | List of HedgeTickets | `src/agents/hedge_ticket.py` |
+| `POST /api/agent/sessions/{id}/lifecycle` | Re-mark prior trade vs. supplied current regime; emits `close` / `roll` / `enhance` reshape options + Greek-attribution P&L | `src/agents/lifecycle.py` (uses `analysis/pnl_explain.py`) |
+| `GET /api/agent/book` | Book-level aggregated Greeks across all stored sessions, by underlier | `src/agents/book.py` |
+
+### Curve refactor groundwork
+
+- **`DiscountingContext`** (`src/data/discounting.py`) — pair of curves: discount + projection. `flat(rate)` collapses both to the same `FlatRateCurve` for back-compat. v2 plugs an OIS bootstrap.
+- **`DividendCurve`** (`src/data/dividend_curve.py`) — yield-vs-maturity forecast. `flat(q)` for back-compat; `decay(q_today, decay_per_year)` for a linear-decay forecast curve. v2 plugs CME dividend futures.
+- **`implied_correlation`** (`src/data/correlation.py`) — Bakshi-Kapadia-Madan equicorrelation solver from index σ vs. component σs and weights.
+
+These curves are *additions* to `src/data/` — they do not replace the scalar `r` and `q` paths through the existing engines. Wiring them deeper into the pricing pipeline is a v2 follow-up.
+
+### Cost-ceiling guards
+
+Per-session ceiling (`AGENT_COST_CEILING_USD`, default 0.50) was already in place. Phase 7 added a per-process tenant ceiling (`AGENT_TENANT_COST_CEILING_USD`, default 0.0 = disabled) checked against `sum(session.total_cost_usd for all sessions in store)` — a runaway agent on one client cannot exhaust the desk's budget.
+
+### Test coverage for the enrichment layer
+
+- `tests/test_phase7_engines.py` — 26 unit/smoke tests for the new modules.
+- `tests/test_phase7_stress.py` — 58 stress tests: edge regimes (T→0, σ→0), monotonicity invariants (XVA scaling with T and funding spread, bid ≤ mid ≤ ask), multi-asset basket robustness, variance-swap convergence with grid width, end-to-end hedge-ticket emission via OrchestratorAgent.decide_gate, FastAPI endpoint round-trips via TestClient, concurrency (8-thread router calls), random seed sweeps for phoenix + worst-of, KID PRIIPs SRI matrix correctness for IG and sub-IG counterparties.
+
 ## Known caveats
 
-1. **MC is not user-selectable**. The frontend MC controls are inert in production. Fix: add `engine` to `PricingRequest`.
+1. **MC is not user-selectable on the legacy path**. The frontend MC controls are inert in the original Quick Pricer flow; `route_with_engine(engine="mc")` is wired correctly in the router but isn't surfaced through the UI yet.
 2. **American + barrier is not supported**. The router has no `american_knockout_*`. The QL `AnalyticBarrierEngine` is European-exercise only; American barriers would need a tree or PDE engine wired in.
 3. **Theta beyond 1 day** is not exposed — only the standard per-day decay.
 4. **Greeks for barriers near the barrier** use a barrier-distance-aware bump step (`greeks_knockout_ql:604-609`) to avoid pin-risk noise; this is intentional but means delta/gamma reported very close to the barrier are smoothed.
 5. **MC fallback module requires QuantLib** (post-swap), so the `if not QUANTLIB_AVAILABLE` branch in `router.py` is logically unreachable in MC paths. Cleaning this up is a follow-up.
-6. **Agent SessionStore is in-memory only** — sessions are lost on restart. Phase 6 swaps for SQLite.
+6. **Agent SessionStore defaults to in-memory** — set `VOL_DESK_PERSIST=1` to use the SQLite-backed store at `vol_desk_sessions.db` (configurable via `VOL_DESK_DB_PATH`). Production deployments should set this; the in-memory default keeps the existing test suite stable.
 7. **`backend/`** at repo root is an empty placeholder (an early-design artifact); the real backend lives under `src/api/`.
+8. **Reverse convertible engine** (`src/engines/reverse_convertible.py`) ships but is not router-wired. The vanilla pricer signature doesn't carry the structural inputs (coupon rate, par-pricing solver) that an RC needs.
+9. **FX (`src/data/fx.py`) and Heston (`src/engines/heston.py`)** are skeletons. FX vanilla via Garman-Kohlhagen works; FX vol-surface conventions (delta-strike, premium-included delta, NY/Tokyo cuts) are v2. Heston calibration via QL works; multi-tenor SLV hybrid for proper barrier pricing under skew is v2.
+10. **Vega-bucket grid is approximate**. Phase 7 places the scalar vega in the (T, K) cell closest to the product's actual expiry and ATM; surrounding cells are 0. A real (T, K)-localised vol-surface bump is v2.
+11. **Strategist rule table (`src/agents/rules/strategy_rules.py`) hasn't been extended with the new multi-asset structures**. The rule pattern uses single-asset `Leg` objects, while phoenix/worst-of need multi-asset `Structure` objects. Surfacing autocallables and worst-of through the structuring co-pilot's Gate B candidate selection is a v2 effort.
+12. **Multi-curve discounting + dividend curve are skeletons in `src/data/`** — they do not yet replace the scalar `r` and `q` paths through the existing engines. Front-end of the wiring is in place; the engine-layer plumbing is v2.
