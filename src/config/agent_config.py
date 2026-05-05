@@ -73,6 +73,13 @@ class AgentConfig:
     # Demo / safety knobs.
     demo_replay: bool = False
     cost_ceiling_usd: float = 0.50
+    # Phase 7 — tenant-level cost ceiling. Per-process accumulator across
+    # ALL sessions in the current process. ``0.0`` disables the global cap;
+    # any positive value triggers a hard error when sum(cost across all
+    # sessions in the store) exceeds it. Useful for shared dev tenants
+    # where a runaway loop on one client must not exhaust the budget for
+    # the whole desk.
+    tenant_cost_ceiling_usd: float = 0.0
 
     # Tier defaults.
     model_smart: str = DEFAULT_MODEL_SMART
@@ -155,6 +162,7 @@ def _from_env() -> AgentConfig:
         openrouter_api_key=os.getenv("OPENROUTER_API_KEY", "").strip(),
         demo_replay=os.getenv("DEMO_REPLAY", "0").strip() in {"1", "true", "True"},
         cost_ceiling_usd=float(os.getenv("AGENT_COST_CEILING_USD", "0.50")),
+        tenant_cost_ceiling_usd=float(os.getenv("AGENT_TENANT_COST_CEILING_USD", "0.0")),
         model_smart=smart,
         model_fast=fast,
         model_strategist=_per_agent("AGENT_MODEL_STRATEGIST", smart),

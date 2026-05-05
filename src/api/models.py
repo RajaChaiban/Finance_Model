@@ -72,6 +72,21 @@ class PricingRequest(BaseModel):
     # Deep risk: when True, compute scenario grid (S x sigma) and gamma ladder.
     deep_risk: bool = Field(default=False, description="Compute scenario grid + gamma ladder")
 
+    # ---- Phase 7 — XVA / quote / cross-Greek toggles ----
+    # XVA inputs. ``None`` lets the handler use sensible defaults (50bps
+    # funding, 100bps CDS, R=40%, no-CSA, buyer side). Pass an explicit dict
+    # to override per-trade.
+    xva_inputs: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="FVA/CVA overlay inputs: funding_spread_bps, cds_spread_bps, recovery, csa, direction",
+    )
+    # Cross-Greeks (vanna/volga) — automatically computed for KO/KI products
+    # because they dominate the risk picture; togglable for other products.
+    compute_vanna_volga: bool = Field(
+        default=False,
+        description="Compute vanna and volga via bump-and-reprice (slow)",
+    )
+
 
 class PricingResult(BaseModel):
     """Response schema for /api/price endpoint."""
@@ -127,6 +142,44 @@ class PricingResult(BaseModel):
     bridge_sigma_rule: Optional[str] = Field(
         default=None,
         description="Surface-to-scalar σ rule for closed-form bridge (KO/KI under live surface)",
+    )
+
+    # ------------------------------------------------------------------
+    # Phase 7 — senior-structurer enrichments
+    # ------------------------------------------------------------------
+
+    # XVA overlay (FVA + simple CVA). None when xva not requested or when the
+    # mid-price is too small to bother (degenerate case). When populated, the
+    # client-facing ask is mid + xva.total_xva.
+    xva_overlay: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="FVA/CVA/DVA overlay computed at handler-time",
+    )
+
+    # Bid/mid/offer quote derived from mid + hedging-cost-bps + XVA. Surfaces
+    # what the client actually pays vs. what they would receive on a sell-back.
+    quote_bid: Optional[float] = Field(default=None, description="Dealer bid (price units)")
+    quote_offer: Optional[float] = Field(default=None, description="Dealer offer (price units)")
+    quote_spread_bps: Optional[float] = Field(
+        default=None,
+        description="Bid-offer spread expressed as bps of mid (or notional, where mid is small)",
+    )
+
+    # Vega bucket grid — tenor × strike sensitivity decomposition. The
+    # value is the JSON dump of `analysis.vega_bucket.VegaBucketGrid`.
+    vega_buckets: Optional[Dict[str, Any]] = Field(
+        default=None, description="Vega bucket grid (tenor × strike)"
+    )
+
+    # Cross-Greeks for skew-sensitive products (KO/KI/autocall).
+    vanna: Optional[float] = Field(default=None, description="∂²V/∂S∂σ in $ per (1%σ × $1 spot)")
+    volga: Optional[float] = Field(default=None, description="∂²V/∂σ² in $ per (1% σ)²")
+
+    # Surface staleness — populated when the live surface is built. None
+    # otherwise. UI should warn when > 60s.
+    surface_age_seconds: Optional[float] = Field(
+        default=None,
+        description="Age of the IV surface from build-time to PricingResult emission",
     )
 
 

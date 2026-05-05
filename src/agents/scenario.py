@@ -33,7 +33,8 @@ from .state import (
 logger = logging.getLogger(__name__)
 
 
-# Phase 1 scenario library — small, deterministic, demoable.
+# Phase 1 scenario library — small, deterministic, demoable. These are the
+# default trio every session sees.
 _SCENARIOS = [
     {
         "name": "Rally +15%",
@@ -59,14 +60,54 @@ _SCENARIOS = [
 ]
 
 
+def _historical_scenarios() -> list[dict]:
+    """Pull the historical-crisis scenarios from `src.scenarios.engine`.
+
+    Wired in Phase 7 so a single source of truth exists across the CLI
+    scenario report and the agent's per-candidate scenarios. Lazy import
+    keeps the agents module independent of the CLI scenarios package at
+    import time.
+    """
+    try:
+        from src.scenarios.engine import ScenarioLibrary
+    except Exception:  # noqa: BLE001
+        return []
+    out = []
+    for key in ("crisis_2008", "covid_crash", "flash_crash"):
+        try:
+            sc = ScenarioLibrary.get(key)
+        except ValueError:
+            continue
+        out.append({
+            "name": sc.name,
+            "description": sc.description,
+            "spot_shock_pct": float(sc.spot_shock),
+            # ScenarioLibrary expresses vol shocks as multiplicative ratios
+            # (1.0 = vol doubles); ScenarioAgent expects fractional change
+            # (0.5 = vol +50%, -0.3 = vol −30%). Same convention shift.
+            "vol_shock_pct": float(sc.vol_shock),
+            "rate_shock_abs": float(sc.rate_shock),
+        })
+    return out
+
+
 class ScenarioAgent(BaseAgent):
     name = "ScenarioAgent"
 
-    def __init__(self, mi: Optional[Any] = None) -> None:
+    def __init__(self, mi: Optional[Any] = None, include_historical: bool = True) -> None:
         # Internal pricer doesn't need MI — scenario shocks aren't a place
         # to call out to the corpus on every shocked re-price.
         self._pricer = PricingAgent()
         self.mi = mi
+        # Phase 7: when True, append the historical-crisis library to every
+        # session's scenarios. Default True; tests can disable via flag.
+        self._include_historical = include_historical
+
+    @property
+    def _scenarios(self) -> list[dict]:
+        if self._include_historical:
+            return _SCENARIOS + _historical_scenarios()
+        return list(_SCENARIOS)
 
     def _run(self, session: StructuringSession) -> StructuringSession:
         if session.regime is None or not session.priced:
@@ -125,7 +166,7 @@ class ScenarioAgent(BaseAgent):
         rows: list[ScenarioRow] = []
         original = priced.net_premium  # USD
 
-        for sc in _SCENARIOS:
+        for sc in self._scenarios:
             shocked = self._shock_regime(regime, sc)
             try:
                 stressed = self._pricer._price_candidate(  # noqa: SLF001 — re-use

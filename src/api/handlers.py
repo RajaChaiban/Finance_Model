@@ -1,6 +1,7 @@
 """Handler functions that wrap the existing Python pricing pipeline."""
 
 import logging
+import time
 from datetime import datetime, date, timezone
 from typing import Tuple, Dict, Any, Optional, List
 
@@ -8,6 +9,8 @@ from src.config.loader import PricingConfig
 from src.engines import router
 from src.report import generator
 from src.analysis.structurer_agent import StructurerReview
+from src.analysis.xva import XVAInputs, compute_xva
+from src.analysis.vanna_volga import compute_vanna_volga
 from .models import PricingRequest, PricingResult
 
 logger = logging.getLogger(__name__)
@@ -85,6 +88,10 @@ def price_option(request: PricingRequest) -> PricingResult:
         surface_quotes_total: Optional[int] = None
         surface_status: str = "skipped"
         surface_failure_reason: Optional[str] = None
+        # Phase 7 — surface staleness tracking. Captures the wall-clock time
+        # of the surface build so the response can carry an age in seconds;
+        # UI surfaces this as a "stale" badge when > 60s.
+        surface_built_at: Optional[float] = None
         if request.use_vol_surface:
             try:
                 import QuantLib as ql
@@ -179,6 +186,10 @@ def price_option(request: PricingRequest) -> PricingResult:
                         )
                     else:
                         surface_status = "ok"
+                    # Stamp the build wall-clock so the response can advertise
+                    # surface age. Captured here whether status is "ok" or
+                    # "suspect" — a suspect surface still has a meaningful age.
+                    surface_built_at = time.time()
                     logger.info(
                         f"Surface built: {grid.n_quotes_inverted}/{grid.n_quotes_total} "
                         f"quotes; σ@K={sigma_atm:.4f}"
@@ -316,6 +327,75 @@ def price_option(request: PricingRequest) -> PricingResult:
                     config.option_type, S, K, r, sigma, T, q, **engine_kwargs
                 )
             ]
+
+        # ------------------------------------------------------------------
+        # Phase 7 — XVA overlay, bid/offer quote, cross-Greeks, surface age
+        # ------------------------------------------------------------------
+        try:
+            xva_kwargs = (request.xva_inputs or {}).copy()
+            xva_inputs_obj = XVAInputs(
+                funding_spread_bps=float(xva_kwargs.get("funding_spread_bps", 50.0)),
+                cds_spread_bps=float(xva_kwargs.get("cds_spread_bps", 100.0)),
+                recovery=float(xva_kwargs.get("recovery", 0.40)),
+                direction=xva_kwargs.get("direction", "buy"),
+                csa=bool(xva_kwargs.get("csa", False)),
+            )
+            xva = compute_xva(
+                mid_price=float(price),
+                maturity_years=pricing_params["T"],
+                inputs=xva_inputs_obj,
+            )
+            result.xva_overlay = xva.to_dict()
+            # Bid/offer derived from mid + xva. Spread expressed in bps of mid
+            # when mid is non-trivial, else bps of the strike (a stable
+            # reference for digital / variance products whose "price" is a
+            # rate, not a USD value).
+            mid = float(price)
+            ref = mid if abs(mid) > 1e-3 else float(pricing_params["K"])
+            if ref > 0:
+                spread_bps = (xva.ask_price - xva.bid_price) / ref * 10_000.0
+            else:
+                spread_bps = 0.0
+            result.quote_bid = float(xva.bid_price)
+            result.quote_offer = float(xva.ask_price)
+            result.quote_spread_bps = float(spread_bps)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("XVA overlay failed: %s", exc)
+
+        # Cross-Greeks (vanna/volga). Auto-on for KO/KI; explicit for others.
+        is_barrier_product = (
+            "knockout" in config.option_type or "knockin" in config.option_type
+        )
+        if request.compute_vanna_volga or is_barrier_product:
+            try:
+                S = pricing_params["S"]
+                _sigma = float(pricing_params["sigma"])
+                _r = float(pricing_params["r"])
+                _T = float(pricing_params["T"])
+                _q = float(pricing_params["q"])
+                _K = float(pricing_params["K"])
+                _engine_kw = {
+                    k: v for k, v in pricing_params.items()
+                    if k in ("barrier_level", "monitoring",
+                             "averaging_method", "averaging_frequency", "lookback_type")
+                    and v is not None
+                }
+
+                def _price_at(S_b, sigma_b, _pf=pricer_func, _kw=_engine_kw):
+                    p, _, _ = _pf(S_b, _K, _r, sigma_b, _T, _q, **_kw)
+                    return float(p)
+
+                cg = compute_vanna_volga(
+                    price_fn=_price_at, spot=float(S), sigma=_sigma,
+                )
+                result.vanna = cg["vanna"]
+                result.volga = cg["volga"]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Vanna/volga compute failed: %s", exc)
+
+        # Surface age — only set when a surface was actually built.
+        if surface_built_at is not None:
+            result.surface_age_seconds = max(time.time() - surface_built_at, 0.0)
 
         return result
 

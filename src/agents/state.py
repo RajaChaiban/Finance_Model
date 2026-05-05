@@ -73,6 +73,18 @@ class StructureKind(str, Enum):
     SHORT_STRANGLE = "short_strangle"
     IRON_CONDOR = "iron_condor"
 
+    # Phase 6 — multi-asset / structured products. The first three require
+    # `BasketObjective` rather than a single-name `ClientObjective`; the
+    # rest are single-name.
+    PHOENIX_AUTOCALL = "phoenix_autocall"
+    WORST_OF_PUT = "worst_of_put"
+    WORST_OF_CALL = "worst_of_call"
+    REVERSE_CONVERTIBLE = "reverse_convertible"
+    DIGITAL_CALL = "digital_call"
+    DIGITAL_PUT = "digital_put"
+    SHARK_FIN = "shark_fin"
+    VARIANCE_SWAP = "variance_swap"
+
 
 # ---------------------------------------------------------------------------
 # Client intake
@@ -261,6 +273,10 @@ class PricedCandidate(BaseModel):
     feasible: bool = True
     feasibility_notes: list[str] = Field(default_factory=list)
 
+    # Phase 7 enrichments — populated by handlers.py / orchestrator post-pricing.
+    xva: Optional["XVAOverlayState"] = None
+    quote: Optional["BidOfferQuote"] = None
+
 
 # ---------------------------------------------------------------------------
 # Scenario + Validator outputs
@@ -437,6 +453,11 @@ class StructuringSession(BaseModel):
     # Last error for surfaced UI display.
     last_error: Optional[str] = None
 
+    # Hedge ticket — emitted by the orchestrator after Gate C approval, one
+    # per recommended candidate. Surfaced on the SSE stream as a
+    # `hedge_ticket` event so the flow desk can read it without polling.
+    hedge_tickets: list["HedgeTicketState"] = Field(default_factory=list)
+
     def append_audit(self, entry: AuditEntry) -> None:
         self.audit.append(entry)
         self.updated_at = datetime.now(timezone.utc)
@@ -534,3 +555,55 @@ class Structure(BaseModel):
     notional: float = 1_000_000.0
     autocall_terms: Optional[AutocallTerms] = None
     observation_schedule: Optional[ObservationSchedule] = None
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Senior-structurer enrichments on PricedCandidate
+# ---------------------------------------------------------------------------
+
+
+class XVAOverlayState(BaseModel):
+    """Pydantic mirror of `src.analysis.xva.XVAOverlay` for storage/serialisation."""
+    model_config = ConfigDict(extra="forbid")
+    mid_price: float
+    fva: float
+    cva: float
+    dva: float = 0.0
+    total_xva: float
+    ask_price: float
+    bid_price: float
+    funding_spread_bps: float = 0.0
+    cp_hazard_rate: float = 0.0
+    csa_protected: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
+class BidOfferQuote(BaseModel):
+    """The desk's actual quote: bid / mid / offer in price units."""
+    model_config = ConfigDict(extra="forbid")
+    bid: float
+    mid: float
+    offer: float
+    spread_bps: float = 0.0
+
+
+class HedgeTicketState(BaseModel):
+    """Pydantic mirror of `src.agents.hedge_ticket.HedgeTicket`."""
+    model_config = ConfigDict(extra="forbid")
+    candidate_id: str
+    structure_name: str
+    notional_usd: float
+    opening_delta_shares: float
+    opening_vega_per_pct: float
+    opening_gamma_per_dollar: float
+    gamma_rebal_budget_per_day: float
+    rebalance_frequency: str
+    listed_proxies: list[dict[str, Any]] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+
+
+# Resolve the forward-references on PricedCandidate / StructuringSession
+# (which referred to XVAOverlayState / BidOfferQuote / HedgeTicketState
+# *before* their definitions thanks to `from __future__ import annotations`).
+PricedCandidate.model_rebuild()
+StructuringSession.model_rebuild()

@@ -114,13 +114,37 @@ _GLOBAL_STORE: Optional[SessionStore] = None
 
 
 def get_store() -> SessionStore:
+    """Resolve the global SessionStore.
+
+    Default is in-memory. Production deployments set ``VOL_DESK_PERSIST=1``
+    to switch to the SQLite-backed store (recommended for any environment
+    where session loss on restart is unacceptable — i.e. all non-test envs).
+
+    The SQLite path falls back to in-memory if its import fails (keeps
+    minimal-deps test environments tolerant). When the SQLite store is
+    selected but the import succeeds, ``VOL_DESK_DB_PATH`` (default
+    ``vol_desk_sessions.db``) controls the file location.
+
+    Test-isolation note: tests that need a fresh global store between cases
+    should call ``reset_store()`` directly. The default in-memory mode keeps
+    the existing test suite stable; flipping to SQLite-by-default is a one-
+    line change once a test fixture writes to ``tmp_path`` and resets after
+    each run.
+    """
     global _GLOBAL_STORE
     if _GLOBAL_STORE is None:
         if os.getenv("VOL_DESK_PERSIST") == "1":
-            from .persistence import SQLiteSessionStore
-            _GLOBAL_STORE = SQLiteSessionStore(
-                db_path=os.getenv("VOL_DESK_DB_PATH", "vol_desk_sessions.db")
-            )
+            try:
+                from .persistence import SQLiteSessionStore
+                _GLOBAL_STORE = SQLiteSessionStore(
+                    db_path=os.getenv("VOL_DESK_DB_PATH", "vol_desk_sessions.db")
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "SQLite session store unavailable (%s) — falling back to in-memory.",
+                    exc,
+                )
+                _GLOBAL_STORE = SessionStore()
         else:
             _GLOBAL_STORE = SessionStore()
     return _GLOBAL_STORE
@@ -254,9 +278,58 @@ class OrchestratorAgent:
             self._emit(session, "cancelled", f"Cancelled at {gate.value}.")
             return session
 
+        # Phase 7 — at Gate C approval, emit a hedge ticket per priced
+        # candidate so the flow desk receives the opening-hedge spec without
+        # polling. Failures here must NOT block the gate decision; the
+        # ticket is a downstream artefact, not part of the structuring path.
+        if gate == Gate.C and approved:
+            try:
+                self._emit_hedge_tickets(session)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("HedgeTicket emission failed: %s", exc)
+
         # Approved — advance.
         self._safe_advance(session_id)
         return self.store.get(session_id) or session
+
+    # ------------------------------------------------------------------
+    # Phase 7 — Post-Gate-C hedge-ticket emission
+    # ------------------------------------------------------------------
+
+    def _emit_hedge_tickets(self, session: StructuringSession) -> None:
+        """Build a HedgeTicket for the recommended candidate (and any others
+        the desk wants visibility on) and stamp it onto session.hedge_tickets,
+        then emit a `hedge_ticket` event so the SSE stream surfaces it."""
+        from datetime import date, timedelta
+        from .hedge_ticket import build_hedge_ticket
+        from .state import HedgeTicketState
+
+        if session.regime is None or not session.priced or session.objective is None:
+            return
+
+        for pc in session.priced:
+            try:
+                # Use the first leg's expiry as the structure expiry approximation.
+                first_leg = pc.candidate.legs[0]
+                exp_date = (date.today() + timedelta(days=int(first_leg.expiry_days))).isoformat()
+                ticket = build_hedge_ticket(
+                    candidate_id=pc.candidate.candidate_id,
+                    structure_name=pc.candidate.name,
+                    notional_usd=pc.candidate.notional_usd,
+                    delta_per_share=pc.greeks.delta,
+                    gamma_per_share=pc.greeks.gamma,
+                    vega_per_share=pc.greeks.vega,
+                    spot=session.regime.spot,
+                    sigma=(session.regime.atm_iv or session.regime.realised_vol_30d or 0.20),
+                    underlier=session.objective.underlying,
+                    expiry_iso=exp_date,
+                )
+                state_obj = HedgeTicketState(**ticket.to_dict())
+                session.hedge_tickets.append(state_obj)
+                self._emit(session, "hedge_ticket", state_obj.model_dump())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("HedgeTicket build failed for %s: %s", pc.candidate.name, exc)
+        self.store.update(session)
 
     # ------------------------------------------------------------------
     # State machine
@@ -552,10 +625,26 @@ class OrchestratorAgent:
             AuditEntry(agent="Orchestrator", event=event_type, message=message),
         )
 
-    @staticmethod
-    def _budget_exceeded(session: StructuringSession) -> bool:
-        ceiling = get_agent_config().cost_ceiling_usd
-        return session.total_cost_usd > ceiling > 0
+    def _budget_exceeded(self, session: StructuringSession) -> bool:
+        cfg = get_agent_config()
+        # Per-session ceiling (existing behaviour).
+        if 0 < cfg.cost_ceiling_usd < session.total_cost_usd:
+            return True
+        # Phase 7 — tenant-level ceiling. Only checked when explicitly set
+        # (positive value); 0.0 disables the cap so existing tests don't
+        # change behaviour.
+        if cfg.tenant_cost_ceiling_usd > 0:
+            try:
+                tenant_total = sum(
+                    (self.store.get(sid).total_cost_usd or 0.0)
+                    for sid in self.store.list_ids()
+                    if self.store.get(sid) is not None
+                )
+            except Exception:  # noqa: BLE001 — defensive; never break the loop
+                tenant_total = session.total_cost_usd
+            if tenant_total > cfg.tenant_cost_ceiling_usd:
+                return True
+        return False
 
 
 _GLOBAL_ORCHESTRATOR: Optional[OrchestratorAgent] = None

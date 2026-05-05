@@ -6,6 +6,7 @@ Falls back to manual implementations if QuantLib unavailable.
 
 from typing import Callable, Tuple
 from . import black_scholes, monte_carlo_lsm, knockout, asian, lookback
+from . import digitals, variance_swap as _var_swap, multi_asset_mc, autocallable as _autocall
 
 try:
     from . import quantlib_engine
@@ -88,6 +89,37 @@ def route(option_type: str) -> Tuple[Callable, Callable, str]:
             _make_lookback_pricer("put"),
             _make_lookback_greeks("put"),
             "QuantLib (Lookback, Analytical)",
+        ),
+        # ---------- Phase 7 — Senior-structurer product additions ----------
+        "digital_call": (
+            _make_digital_pricer("call"),
+            _make_digital_greeks("call"),
+            "Digital cash-or-nothing call (Black-Scholes closed-form)",
+        ),
+        "digital_put": (
+            _make_digital_pricer("put"),
+            _make_digital_greeks("put"),
+            "Digital cash-or-nothing put (Black-Scholes closed-form)",
+        ),
+        "phoenix_autocall": (
+            _make_phoenix_pricer(),
+            _make_phoenix_greeks(),
+            "Phoenix autocallable (multi-asset MC, worst-of basket)",
+        ),
+        "worst_of_put": (
+            _make_worst_of_pricer("put"),
+            _make_worst_of_greeks("put"),
+            "Worst-of basket put (correlated multi-asset MC)",
+        ),
+        "worst_of_call": (
+            _make_worst_of_pricer("call"),
+            _make_worst_of_greeks("call"),
+            "Worst-of basket call (correlated multi-asset MC)",
+        ),
+        "variance_swap": (
+            _make_var_swap_pricer(),
+            _make_var_swap_greeks(),
+            "Variance swap (log-contract replication)",
         ),
     }
 
@@ -312,6 +344,222 @@ def _make_lookback_greeks(opt: str) -> Callable:
             S, K, r, sigma, T, q,
             option_type=opt, lookback_type=lookback_type,
         )
+    return greeks
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Senior-structurer product wrappers
+# ---------------------------------------------------------------------------
+#
+# Digitals: closed-form (BS) cash-or-nothing. We do NOT route digitals through
+# the smile-aware path in this phase — the analytic digital is enough for an
+# indicative quote, and the FDM-LV machinery is overkill for a leaf product
+# that's mainly used as a building block for shark-fins / range accruals.
+#
+# Phoenix / worst-of: dispatch to the existing multi-asset MC engines. These
+# require **multi-asset inputs** (correlation matrix, basket spots, basket
+# vols) which the single-asset PricingRequest doesn't carry. Tests / agent
+# paths supply the basket via kwargs.
+#
+# Variance swap: takes a vol strip (strikes + ivs) via kwargs; degrades to
+# the flat-σ fair-strike when none is supplied. The "price" returned is the
+# fair *vol strike*, not a USD value — interpret this as σ_var, the level
+# at which a swap with zero PV is struck.
+
+
+def _make_digital_pricer(opt: str) -> Callable:
+    def pricer(S, K, r, sigma, T, q, **kwargs):
+        cash_payout = float(kwargs.get("cash_payout", 1.0))
+        return digitals.price_digital_cash(S, K, r, sigma, T, q, opt, cash_payout)
+    return pricer
+
+
+def _make_digital_greeks(opt: str) -> Callable:
+    def greeks(S, K, r, sigma, T, q, **kwargs):
+        cash_payout = float(kwargs.get("cash_payout", 1.0))
+        return digitals.greeks_digital_cash(S, K, r, sigma, T, q, opt, cash_payout)
+    return greeks
+
+
+def _make_phoenix_pricer() -> Callable:
+    """Phoenix autocallable. Requires multi-asset inputs via kwargs:
+        - basket_spots: np.ndarray (n_assets,)
+        - basket_sigma: np.ndarray (n_assets,)
+        - basket_q: np.ndarray (n_assets,)
+        - rho: np.ndarray (n_assets, n_assets)
+        - autocall_terms: AutocallTerms
+        - obs_schedule: ObservationSchedule
+        - notional: float (default 1_000_000)
+        - n_paths: int (default 20_000)
+        - seed: int | None
+    The single-asset (S, K, r, sigma, T, q) inputs are IGNORED for phoenix —
+    they exist only because the router signature is shared. Strategist /
+    PricingAgent must populate the kwargs path.
+    """
+    import numpy as np
+    def pricer(S, K, r, sigma, T, q, **kwargs):
+        terms = kwargs.get("autocall_terms")
+        schedule = kwargs.get("obs_schedule")
+        if terms is None or schedule is None:
+            raise ValueError(
+                "phoenix_autocall requires kwargs: autocall_terms, obs_schedule. "
+                "Single-asset inputs (S, K, ...) are ignored for this product."
+            )
+        S0 = np.asarray(kwargs.get("basket_spots", [S]), dtype=float)
+        sigma_v = np.asarray(kwargs.get("basket_sigma", [sigma] * len(S0)), dtype=float)
+        q_v = np.asarray(kwargs.get("basket_q", [q] * len(S0)), dtype=float)
+        rho = kwargs.get("rho")
+        if rho is None:
+            n = len(S0)
+            rho = np.eye(n) if n > 1 else np.array([[1.0]])
+        rho = np.asarray(rho, dtype=float)
+        price = _autocall.price_phoenix_autocallable(
+            S0=S0, r=r, q=q_v, sigma=sigma_v, rho=rho,
+            terms=terms, schedule=schedule,
+            notional=float(kwargs.get("notional", 1_000_000.0)),
+            n_paths=int(kwargs.get("n_paths", 20_000)),
+            seed=kwargs.get("seed"),
+        )
+        return price, 0.0, None
+    return pricer
+
+
+def _make_phoenix_greeks() -> Callable:
+    """Phoenix Greeks via bump-and-reprice. Slow — uses 6× pricer calls.
+    Returns Greeks in repo conventions."""
+    pricer = _make_phoenix_pricer()
+    def greeks(S, K, r, sigma, T, q, **kwargs):
+        p0, _, _ = pricer(S, K, r, sigma, T, q, **kwargs)
+        h_S = max(S * 0.01, 0.01)
+        h_v = 0.01
+        h_r = 0.0001
+        # Re-use the same seed across bumps for variance reduction.
+        kw = {**kwargs, "seed": kwargs.get("seed", 42)}
+        p_S_up, _, _ = pricer(S + h_S, K, r, sigma, T, q, **kw)
+        p_S_dn, _, _ = pricer(S - h_S, K, r, sigma, T, q, **kw)
+        delta = (p_S_up - p_S_dn) / (2 * h_S)
+        gamma = (p_S_up - 2 * p0 + p_S_dn) / (h_S ** 2)
+        p_v_up, _, _ = pricer(S, K, r, sigma + h_v, T, q, **kw)
+        p_v_dn, _, _ = pricer(S, K, r, sigma - h_v, T, q, **kw)
+        vega = (p_v_up - p_v_dn) / (2 * h_v) / 100.0
+        p_r_up, _, _ = pricer(S, K, r + h_r, sigma, T, q, **kw)
+        p_r_dn, _, _ = pricer(S, K, r - h_r, sigma, T, q, **kw)
+        rho = (p_r_up - p_r_dn) / (2 * h_r) / 100.0
+        # Theta: forward 1-day bump (small relative to MC noise — flag it).
+        dt = 1.0 / 365.0
+        if T - dt > 0:
+            p_t, _, _ = pricer(S, K, r, sigma, T - dt, q, **kw)
+            theta = p_t - p0
+        else:
+            theta = 0.0
+        return {
+            "price": p0, "delta": delta, "gamma": gamma,
+            "vega": vega, "theta": theta, "rho": rho,
+        }
+    return greeks
+
+
+def _make_worst_of_pricer(opt: str) -> Callable:
+    """Worst-of basket put/call. Currently only put has a closed-form MC
+    in `multi_asset_mc.price_worst_of_european_put`; call is symmetric and
+    inverts the worst-of to best-of-shorts."""
+    import numpy as np
+    def pricer(S, K, r, sigma, T, q, **kwargs):
+        S0 = np.asarray(kwargs.get("basket_spots", [S]), dtype=float)
+        sigma_v = np.asarray(kwargs.get("basket_sigma", [sigma] * len(S0)), dtype=float)
+        q_v = np.asarray(kwargs.get("basket_q", [q] * len(S0)), dtype=float)
+        rho = kwargs.get("rho")
+        if rho is None:
+            n = len(S0)
+            rho = np.eye(n) if n > 1 else np.array([[1.0]])
+        rho = np.asarray(rho, dtype=float)
+        if opt == "put":
+            price = multi_asset_mc.price_worst_of_european_put(
+                S0=S0, K=K, r=r, q=q_v, sigma=sigma_v, rho=rho, T=T,
+                n_paths=int(kwargs.get("n_paths", 20_000)),
+                seed=kwargs.get("seed"),
+            )
+            return float(price), 0.0, None
+        # Call side: simulate, take worst-of perf, payoff = max(worst − K_norm, 0).
+        # K is interpreted as in same units as S0[0] for back-compat.
+        from .multi_asset_mc import simulate_correlated_gbm
+        paths = simulate_correlated_gbm(
+            S0=S0, r=r, q=q_v, sigma=sigma_v, rho=rho, T=T,
+            n_steps=1, n_paths=int(kwargs.get("n_paths", 20_000)),
+            seed=kwargs.get("seed"),
+        )
+        S_T = paths[:, -1, :]
+        worst_perf = (S_T / S0).min(axis=1)
+        payoff = np.maximum(worst_perf * S0[0] - K, 0.0)
+        import math
+        price = math.exp(-r * T) * float(payoff.mean())
+        return float(price), 0.0, None
+    return pricer
+
+
+def _make_worst_of_greeks(opt: str) -> Callable:
+    """Bump-reprice Greeks for worst-of. Uses a fixed seed for CRN."""
+    pricer = _make_worst_of_pricer(opt)
+    def greeks(S, K, r, sigma, T, q, **kwargs):
+        kw = {**kwargs, "seed": kwargs.get("seed", 42)}
+        p0, _, _ = pricer(S, K, r, sigma, T, q, **kw)
+        h_S = max(S * 0.01, 0.01)
+        h_v = 0.01
+        h_r = 0.0001
+        p_S_up, _, _ = pricer(S + h_S, K, r, sigma, T, q, **kw)
+        p_S_dn, _, _ = pricer(S - h_S, K, r, sigma, T, q, **kw)
+        delta = (p_S_up - p_S_dn) / (2 * h_S)
+        gamma = (p_S_up - 2 * p0 + p_S_dn) / (h_S ** 2)
+        p_v_up, _, _ = pricer(S, K, r, sigma + h_v, T, q, **kw)
+        p_v_dn, _, _ = pricer(S, K, r, sigma - h_v, T, q, **kw)
+        vega = (p_v_up - p_v_dn) / (2 * h_v) / 100.0
+        p_r_up, _, _ = pricer(S, K, r + h_r, sigma, T, q, **kw)
+        p_r_dn, _, _ = pricer(S, K, r - h_r, sigma, T, q, **kw)
+        rho_g = (p_r_up - p_r_dn) / (2 * h_r) / 100.0
+        dt = 1.0 / 365.0
+        if T - dt > 0:
+            p_t, _, _ = pricer(S, K, r, sigma, T - dt, q, **kw)
+            theta = p_t - p0
+        else:
+            theta = 0.0
+        return {
+            "price": p0, "delta": delta, "gamma": gamma,
+            "vega": vega, "theta": theta, "rho": rho_g,
+        }
+    return greeks
+
+
+def _make_var_swap_pricer() -> Callable:
+    """Variance swap fair strike. The "price" returned is K_var (the fair
+    volatility strike, in vol-units). std_error and paths are placeholders."""
+    import numpy as np
+    def pricer(S, K, r, sigma, T, q, **kwargs):
+        strikes = kwargs.get("strikes")
+        ivs = kwargs.get("ivs")
+        if strikes is not None and ivs is not None:
+            res = _var_swap.fair_strike_from_strip(
+                S=S, r=r, q=q, T=T,
+                strikes=np.asarray(strikes, dtype=float),
+                ivs=np.asarray(ivs, dtype=float),
+            )
+        else:
+            res = _var_swap.fair_strike_flat(sigma)
+        # Encode the fair strike as the "price" — caller reads via method label.
+        return float(res.fair_strike_var), 0.0, None
+    return pricer
+
+
+def _make_var_swap_greeks() -> Callable:
+    """Variance swap Greeks — minimal. Vega is the dominant Greek; deltas
+    are zero by construction (replicating portfolio is delta-hedged).
+    """
+    def greeks(S, K, r, sigma, T, q, **kwargs):
+        return {
+            "price": sigma,  # fair strike at flat σ is σ
+            "delta": 0.0, "gamma": 0.0,
+            "vega": 0.0,    # at the fair strike the swap PV is zero by definition
+            "theta": 0.0, "rho": 0.0,
+        }
     return greeks
 
 

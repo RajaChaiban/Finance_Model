@@ -201,3 +201,200 @@ async def stream_events(session_id: str):
             await asyncio.sleep(1.0)
 
     return EventSourceResponse(gen())
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Senior-structurer endpoints: termsheet, KID, book, lifecycle
+# ---------------------------------------------------------------------------
+
+
+@router.get("/sessions/{session_id}/termsheet")
+async def get_termsheet(session_id: str, candidate_id: str | None = None) -> Any:
+    """Generate the PRIIPs-style termsheet PDF for the session's recommended
+    candidate (or a specific candidate if ``candidate_id`` is supplied).
+
+    Returns the PDF inline. Generation is synchronous because the underlying
+    reportlab call is fast (<200ms typical).
+    """
+    import io
+    import os
+    import tempfile
+    from fastapi.responses import FileResponse
+
+    from src.report.term_sheet import generate_term_sheet
+    from src.agents.state import (
+        Structure as StructureModel,
+        StructureLeg as StructureLegModel,
+        AutocallTerms,
+        ObservationSchedule,
+    )
+
+    store = get_store()
+    session = store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No session {session_id}")
+    if not session.priced:
+        raise HTTPException(status_code=400, detail="Session has no priced candidates.")
+
+    # Pick the candidate.
+    target = None
+    if candidate_id:
+        target = next((p for p in session.priced if p.candidate.candidate_id == candidate_id), None)
+    elif session.memo and session.memo.recommended_candidate_id:
+        target = next(
+            (p for p in session.priced
+             if p.candidate.candidate_id == session.memo.recommended_candidate_id),
+            None,
+        )
+    target = target or session.priced[0]
+
+    # Build a minimal Structure from the agent-pipeline Candidate (the term
+    # sheet generator was built against the multi-asset Structure schema; we
+    # adapt the single-asset legs into StructureLeg entries).
+    structure_legs = []
+    for leg in target.candidate.legs:
+        structure_legs.append(StructureLegModel(
+            side="long" if leg.quantity > 0 else "short",
+            quantity=abs(float(leg.quantity)),
+            instrument_kind=leg.option_type if leg.option_type in {
+                "european_call", "european_put", "knockout_call", "knockout_put",
+                "knockin_call", "knockin_put", "asian_call", "asian_put",
+                "lookback_call", "lookback_put",
+            } else "european_call",   # safe fallback
+            strike=float(leg.strike),
+            barrier=float(leg.barrier_level) if leg.barrier_level is not None else None,
+        ))
+    maturity_years = (
+        max((leg.expiry_days for leg in target.candidate.legs), default=365) / 365.0
+    )
+    structure = StructureModel(
+        name=target.candidate.name,
+        legs=structure_legs,
+        maturity_years=maturity_years,
+        notional=float(target.candidate.notional_usd),
+    )
+
+    # Indicative scenarios — flat moves around 1.0 (no MC for this stub).
+    scenarios = {
+        "favourable": 1.30,
+        "moderate": 1.05,
+        "unfavourable": 0.75,
+        "stress": 0.50,
+    }
+
+    # Write to a temp file and stream the response.
+    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+    tmp.close()
+    try:
+        out_path = generate_term_sheet(
+            structure=structure,
+            mid_price=float(target.net_premium),
+            scenarios=scenarios,
+            output_path=tmp.name,
+        )
+        return FileResponse(
+            out_path,
+            media_type="application/pdf",
+            filename=f"termsheet_{session_id[:8]}.pdf",
+        )
+    except Exception as exc:  # noqa: BLE001
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        raise HTTPException(status_code=500, detail=f"Termsheet generation failed: {exc}") from exc
+
+
+@router.get("/sessions/{session_id}/kid")
+async def get_kid(session_id: str, candidate_id: str | None = None) -> Any:
+    """Return a JSON KID payload (SRI bucket, cost table, scenarios) for the
+    session's recommended candidate. v1 — JSON only; PDF rendering is
+    plumbed through the existing termsheet endpoint."""
+    from src.report.kid import build_kid
+
+    store = get_store()
+    session = store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No session {session_id}")
+    if not session.priced or session.regime is None:
+        raise HTTPException(status_code=400, detail="Session not priced.")
+
+    target = None
+    if candidate_id:
+        target = next((p for p in session.priced if p.candidate.candidate_id == candidate_id), None)
+    elif session.memo and session.memo.recommended_candidate_id:
+        target = next(
+            (p for p in session.priced
+             if p.candidate.candidate_id == session.memo.recommended_candidate_id),
+            None,
+        )
+    target = target or session.priced[0]
+
+    rhp = max((leg.expiry_days for leg in target.candidate.legs), default=365) / 365.0
+    sigma = (session.regime.atm_iv or session.regime.realised_vol_30d or 0.20)
+    kid = build_kid(
+        product_name=target.candidate.name,
+        notional=float(target.candidate.notional_usd),
+        rhp_years=rhp,
+        annualised_vol=float(sigma),
+    )
+    return JSONResponse(content=kid.to_dict())
+
+
+@router.get("/sessions/{session_id}/hedge_tickets")
+async def get_hedge_tickets(session_id: str) -> Any:
+    """Return all hedge tickets emitted at Gate C approval for this session."""
+    store = get_store()
+    session = store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No session {session_id}")
+    return JSONResponse(content=[t.model_dump() for t in session.hedge_tickets])
+
+
+@router.get("/book")
+async def get_book(name: str = "default-book") -> Any:
+    """Aggregate all sessions in the store into a book view."""
+    from src.agents.book import aggregate_book
+
+    store = get_store()
+    ids = store.list_ids()
+    sessions = [store.get(sid) for sid in ids]
+    sessions = [s for s in sessions if s is not None]
+    summary = aggregate_book(sessions=sessions, name=name)
+    return JSONResponse(content=summary.to_dict())
+
+
+@router.post("/sessions/{session_id}/lifecycle")
+async def assess_lifecycle(session_id: str, payload: dict[str, Any]) -> Any:
+    """Re-mark a prior session against today's regime.
+
+    Body: {"current_regime": {"spot": ..., "realised_vol_30d": ..., ...}}
+    Returns: LifecycleAssessment for the session's recommended candidate.
+    """
+    from src.agents.lifecycle import LifecycleAgent
+    from src.agents.state import MarketRegime
+
+    store = get_store()
+    session = store.get(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail=f"No session {session_id}")
+    if not session.priced or session.regime is None:
+        raise HTTPException(status_code=400, detail="Session not priced.")
+
+    target = next(
+        (p for p in session.priced
+         if session.memo and p.candidate.candidate_id == session.memo.recommended_candidate_id),
+        session.priced[0],
+    )
+    try:
+        current_regime = MarketRegime(**(payload.get("current_regime") or {}))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid current_regime: {exc}") from exc
+
+    agent = LifecycleAgent()
+    assessment = agent.assess(
+        prior=target,
+        prior_regime=session.regime,
+        current_regime=current_regime,
+    )
+    return JSONResponse(content=assessment.to_dict())
