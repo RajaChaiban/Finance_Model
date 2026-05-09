@@ -1466,9 +1466,30 @@ body {
   letter-spacing: -0.2px;
 }
 .vd-briefing-asof {
-  font-size: 0.76rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.74rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px 10px 3px 9px;
+  font-weight: 500;
+}
+.vd-briefing-asof-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-soft);
+  flex-shrink: 0;
+  animation: vd-pulse 2s ease-in-out infinite;
+}
+@keyframes vd-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
 }
 .vd-briefing-summary {
   font-size: 0.88rem;
@@ -1675,20 +1696,117 @@ body {
   font-size: 0.68rem;
   color: var(--text-muted);
 }
-/* Themes */
+/* Themes — categorized trade-idea rows */
+.vd-briefing-themes-block {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+.vd-briefing-themes-head {
+  margin-bottom: 8px;
+}
 .vd-briefing-themes {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
+  flex-direction: column;
+  gap: 4px;
 }
-.vd-briefing-theme-chip {
-  font-size: 0.7rem;
+.vd-briefing-themes-multicol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+@media (max-width: 1100px) {
+  .vd-briefing-themes-multicol { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .vd-briefing-themes-multicol { grid-template-columns: 1fr; }
+}
+.vd-briefing-theme-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 7px 9px 7px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  border-left-width: 3px;
+  transition: var(--transition);
+  position: relative;
+}
+.vd-briefing-theme-row:hover {
+  background: var(--bg-elevated);
+  transform: translateX(1px);
+}
+.vd-briefing-theme-cat {
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  line-height: 1.3;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+.vd-briefing-theme-body {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+/* Category color variants */
+.vd-theme-rates {
+  border-left-color: #f59e0b;
+}
+.vd-theme-rates .vd-briefing-theme-cat {
+  background: rgba(245, 158, 11, 0.12);
+  color: #b45309;
+}
+.vd-theme-curve {
+  border-left-color: #06b6d4;
+}
+.vd-theme-curve .vd-briefing-theme-cat {
+  background: rgba(6, 182, 212, 0.12);
+  color: #0e7490;
+}
+.vd-theme-vol {
+  border-left-color: #8b5cf6;
+}
+.vd-theme-vol .vd-briefing-theme-cat {
+  background: rgba(139, 92, 246, 0.12);
+  color: #6d28d9;
+}
+.vd-theme-skew {
+  border-left-color: #ec4899;
+}
+.vd-theme-skew .vd-briefing-theme-cat {
+  background: rgba(236, 72, 153, 0.12);
+  color: #be185d;
+}
+.vd-theme-sector {
+  border-left-color: var(--success);
+}
+.vd-theme-sector .vd-briefing-theme-cat {
+  background: var(--success-soft);
+  color: #047857;
+}
+.vd-theme-event {
+  border-left-color: var(--danger);
+}
+.vd-theme-event .vd-briefing-theme-cat {
+  background: var(--danger-soft);
+  color: #be123c;
+}
+.vd-theme-default {
+  border-left-color: var(--accent);
+}
+.vd-theme-default .vd-briefing-theme-cat {
   background: var(--accent-soft);
   color: var(--accent-hover);
-  border: 1px solid var(--accent-glow);
-  padding: 3px 9px;
-  border-radius: 999px;
-  white-space: nowrap;
 }
 /* Footer */
 .vd-briefing-footer {
@@ -1757,6 +1875,394 @@ body {
 @media (max-width: 600px) {
   .vd-briefing-grid { grid-template-columns: 1fr; }
   .vd-briefing-grid > :nth-child(3) { grid-column: unset; }
+}
+
+/* ============================================================
+   Shared desk panel pill (vd-briefing-pill)
+   ============================================================ */
+.vd-briefing-pill {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+.vd-pill-green {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.vd-pill-red {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: rgba(244, 63, 94, 0.3);
+}
+.vd-pill-muted {
+  background: var(--bg-elevated);
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+.vd-pill-amber {
+  background: rgba(245, 158, 11, 0.12);
+  color: #92400e;
+  border-color: rgba(245, 158, 11, 0.35);
+}
+.vd-pill-info {
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--accent);
+  border-color: rgba(14, 165, 233, 0.3);
+}
+
+/* ============================================================
+   Shared desk panel frame (summary/details toggle)
+   ============================================================ */
+.vd-briefing-desk-panels {
+  margin-top: 14px;
+}
+.vd-briefing-structurer-panel,
+.vd-briefing-trader-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.vd-briefing-structurer-panel + .vd-briefing-structurer-panel,
+.vd-briefing-trader-panel + .vd-briefing-trader-panel {
+  margin-top: 10px;
+}
+.vd-briefing-desk-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+.vd-briefing-desk-summary::-webkit-details-marker { display: none; }
+.vd-briefing-desk-summary:hover {
+  background: var(--bg-hover);
+}
+.vd-briefing-desk-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.1px;
+}
+.vd-briefing-desk-subtitle {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex: 1;
+}
+.vd-briefing-desk-chevron {
+  font-size: 1rem;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+}
+details[open] .vd-briefing-desk-chevron {
+  transform: rotate(90deg);
+}
+
+/* ============================================================
+   Structurer's Snapshot (vd-briefing-structurer-*)
+   ============================================================ */
+.vd-briefing-structurer-body,
+.vd-briefing-trader-body {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.vd-briefing-structurer-block,
+.vd-briefing-trader-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Vol term structure table */
+.vd-briefing-term-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.vd-briefing-term-table th {
+  text-align: center;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-family: inherit;
+}
+.vd-briefing-term-table th:first-child,
+.vd-briefing-term-table td:first-child {
+  text-align: left;
+  min-width: 60px;
+}
+.vd-briefing-term-table td {
+  text-align: center;
+  padding: 4px 8px;
+  color: var(--text-primary);
+  border-bottom: 1px dashed var(--border);
+}
+.vd-briefing-term-table tr:last-child td { border-bottom: none; }
+.vd-briefing-term-label {
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-family: 'Inter', -apple-system, sans-serif;
+}
+.vd-briefing-term-val { color: var(--text-primary); }
+.vd-briefing-term-chg { font-weight: 600; }
+.vd-briefing-term-chg.up { color: var(--success); }
+.vd-briefing-term-chg.down { color: var(--danger); }
+
+.vd-briefing-term-slope-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.vd-briefing-term-slope-ctx {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+/* Scalar metric strip (skew/vvix/move/corr) */
+.vd-briefing-scalar-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .vd-briefing-scalar-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 500px) {
+  .vd-briefing-scalar-strip { grid-template-columns: 1fr 1fr; }
+}
+.vd-briefing-scalar-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vd-briefing-scalar-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.vd-briefing-scalar-sym {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+.vd-briefing-scalar-level {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+.vd-briefing-scalar-chg {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.74rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.vd-briefing-scalar-chg.up { color: var(--success); }
+.vd-briefing-scalar-chg.down { color: var(--danger); }
+.vd-briefing-scalar-ctx {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+  margin-top: 2px;
+}
+
+/* Realized vs Implied table */
+.vd-briefing-rv-table,
+.vd-briefing-carry-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.vd-briefing-rv-table th,
+.vd-briefing-carry-table th {
+  text-align: left;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border);
+  font-family: inherit;
+}
+.vd-briefing-rv-table td,
+.vd-briefing-carry-table td {
+  padding: 5px 8px;
+  color: var(--text-primary);
+  border-bottom: 1px dashed var(--border);
+  vertical-align: middle;
+}
+.vd-briefing-rv-table tr:last-child td,
+.vd-briefing-carry-table tr:last-child td { border-bottom: none; }
+.vd-briefing-rv-sym {
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.vd-briefing-rv-table td.up,
+.vd-briefing-carry-table td.up { color: var(--success); }
+.vd-briefing-rv-table td.down,
+.vd-briefing-carry-table td.down { color: var(--danger); }
+
+/* Credit proxy strip */
+.vd-briefing-credit-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.vd-briefing-credit-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 90px;
+}
+
+/* ============================================================
+   Trader's Snapshot (vd-briefing-trader-*)
+   ============================================================ */
+
+/* Overnight futures grid */
+.vd-briefing-futures-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 900px) {
+  .vd-briefing-futures-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 500px) {
+  .vd-briefing-futures-grid { grid-template-columns: 1fr 1fr; }
+}
+.vd-briefing-future-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.vd-briefing-future-name {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.vd-briefing-future-level {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+.vd-briefing-future-range {
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+
+/* Global overnight strip */
+.vd-briefing-global-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.vd-briefing-global-tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  min-width: 120px;
+}
+.vd-briefing-global-name {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Cross-asset grid */
+.vd-briefing-crossasset-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 1000px) {
+  .vd-briefing-crossasset-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 600px) {
+  .vd-briefing-crossasset-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.vd-briefing-crossasset-tile {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Loading skeleton desk shimmer */
+.vd-briefing-skeleton-desk {
+  height: 48px;
+  margin-top: 12px;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(90deg,
+      var(--bg-elevated) 0%,
+      var(--bg-hover) 50%,
+      var(--bg-elevated) 100%);
+  background-size: 200% 100%;
+  animation: vd-shimmer 1.4s linear infinite;
 }
 
 /* Condensed hero (now sits below the platform widgets) */

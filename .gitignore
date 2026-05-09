@@ -66,6 +66,10 @@ test-results/
 # Claude Code local state
 .claude/settings.local.json
 .claude/agent-memory/
+.claude/worktrees/
+
+# Research demo screenshots (not synced to remote)
+research/demo-*.png
 
 # CRITICAL: Prevent any cross-project contamination
 # Only files in THIS directory should be tracked

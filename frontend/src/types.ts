@@ -219,6 +219,96 @@ export interface BriefingSource {
   fetched_at: string;
 }
 
+// ---- Structurer desk types --------------------------------------------------
+
+export type BriefingVolTerm = {
+  tenor: string;
+  symbol: string;
+  level: number | null;
+  change_pct: number | null;
+};
+
+export type BriefingTermSlope = {
+  shape: "contango" | "backwardation" | "flat";
+  ratio_30d_3m: number | null;
+  context: string;
+};
+
+export type BriefingScalarMetric = {
+  symbol: string;
+  level: number | null;
+  change_pct: number | null;
+  context: string;
+};
+
+export type BriefingRvIv = {
+  symbol: string;
+  rv_30d: number | null;
+  iv_proxy: number | null;
+  spread_vol_pts: number | null;
+  signal: "sell vol" | "buy vol" | "neutral";
+};
+
+export type BriefingCreditProxy = {
+  symbol: string;
+  name: string;
+  level: number | null;
+  change_pct: number | null;
+};
+
+export type BriefingStructurer = {
+  vol_term_structure: BriefingVolTerm[];
+  term_structure_slope: BriefingTermSlope;
+  skew_index: BriefingScalarMetric;
+  vvix: BriefingScalarMetric;
+  move: BriefingScalarMetric;
+  implied_correlation: BriefingScalarMetric;
+  realized_vs_implied: BriefingRvIv[];
+  credit_proxy: BriefingCreditProxy[];
+};
+
+// ---- Trader desk types ------------------------------------------------------
+
+export type BriefingOvernightFuture = {
+  symbol: string;
+  name: string;
+  level: number | null;
+  change_pct: number | null;
+  session_high: number | null;
+  session_low: number | null;
+};
+
+export type BriefingGlobalIndex = {
+  symbol: string;
+  name: string;
+  change_pct: number | null;
+};
+
+export type BriefingCrossAsset = {
+  symbol: string;
+  name: string;
+  level: number | null;
+  change_pct: number | null;
+};
+
+export type BriefingVolCarry = {
+  symbol: string;
+  name: string;
+  rv_10d: number | null;
+  rv_30d: number | null;
+  iv_proxy: number | null;
+  carry_signal: "sell premium" | "buy premium" | "neutral";
+};
+
+export type BriefingTrader = {
+  overnight_futures: BriefingOvernightFuture[];
+  global_overnight: BriefingGlobalIndex[];
+  cross_asset: BriefingCrossAsset[];
+  vol_carry: BriefingVolCarry[];
+};
+
+// ---- Briefing root ----------------------------------------------------------
+
 export interface Briefing {
   as_of: string;
   title: string;
@@ -232,6 +322,8 @@ export interface Briefing {
   headlines: BriefingHeadline[];
   themes: string[];
   sources: BriefingSource[];
+  structurer?: BriefingStructurer;
+  trader?: BriefingTrader;
 }
 
 export const DEFAULT_CONFIG: ConfigFormState = {
