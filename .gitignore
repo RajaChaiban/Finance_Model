@@ -64,12 +64,30 @@ playwright-report/
 test-results/
 
 # Claude Code local state
-.claude/settings.local.json
-.claude/agent-memory/
-.claude/worktrees/
+.claude/
 
 # Research demo screenshots (not synced to remote)
 research/demo-*.png
+
+# Local-only docs (not synced to remote — keep README.md only)
+CLAUDE.md
+architecture.md
+QUANTLIB_INTEGRATION.md
+SOLVER_COMPONENT.md
+README_structured_pricing.md
+docs/
+
+# Local-only assets / WIP / one-offs
+.stitch-project.json
+.playwright-mcp/
+Knockout_Option_Pricer_SP500.ipynb
+analysis_output.txt
+ko_analysis.py
+test_solver.py
+argopilot-rebrand.png
+mobile-portrait.png
+rebrand-full.png
+reports/
 
 # CRITICAL: Prevent any cross-project contamination
 # Only files in THIS directory should be tracked
