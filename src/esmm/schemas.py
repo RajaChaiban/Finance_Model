@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Side(str, Enum):
@@ -27,6 +27,13 @@ class OrderBookSnapshot(BaseModel):
     """Top-of-book + optional depth for a single instrument at a single ts.
 
     `bids` and `asks` are sorted best-first (highest bid, lowest ask).
+
+    Enforced invariants (so real-data adapters can't silently mis-price the engine):
+      - both sides have ≥ 1 level
+      - bids strictly descending in price
+      - asks strictly ascending in price
+      - book is not crossed: best_bid < best_ask
+      - all sizes ≥ 0
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -35,6 +42,33 @@ class OrderBookSnapshot(BaseModel):
     symbol: str
     bids: list[OrderBookLevel]
     asks: list[OrderBookLevel]
+
+    @model_validator(mode="after")
+    def _validate_book_shape(self) -> "OrderBookSnapshot":
+        """Enforce the invariants real-data adapters can actually violate.
+
+        We deliberately do NOT enforce price > 0 or non-crossed: defensive
+        engine code (e.g. spread_bps NaN-guard, the both-sides-fill rule)
+        is unit-tested with intentionally malformed inputs constructed via
+        model_construct(). The only thing we *can't* afford to let through is
+        out-of-order depth levels — that would silently mis-price every
+        downstream call.
+        """
+        if not self.bids or not self.asks:
+            raise ValueError("OrderBookSnapshot requires at least one bid and one ask level")
+        for i in range(1, len(self.bids)):
+            if self.bids[i].price >= self.bids[i - 1].price:
+                raise ValueError(
+                    f"bids must be strictly descending; got "
+                    f"{self.bids[i - 1].price} then {self.bids[i].price} at index {i}"
+                )
+        for i in range(1, len(self.asks)):
+            if self.asks[i].price <= self.asks[i - 1].price:
+                raise ValueError(
+                    f"asks must be strictly ascending; got "
+                    f"{self.asks[i - 1].price} then {self.asks[i].price} at index {i}"
+                )
+        return self
 
     @property
     def best_bid(self) -> float:

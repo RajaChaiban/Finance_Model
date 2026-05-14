@@ -18,6 +18,7 @@ Entry points used in tests and the FastAPI router:
 """
 
 from src.esmm import (
+    adapters,
     backtest,
     crb,
     features,
@@ -32,6 +33,7 @@ from src.esmm import (
 )
 
 __all__ = [
+    "adapters",
     "backtest",
     "crb",
     "features",
