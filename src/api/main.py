@@ -18,6 +18,7 @@ from .market_data import (
 )
 from ..data.movers import get_movers_payload
 from .agent_router import router as agent_router
+from .esmm_router import router as esmm_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -61,6 +62,7 @@ app.add_middleware(CustomCORSMiddleware)
 
 # Mount the multi-agent structuring co-pilot router under /api/agent/*
 app.include_router(agent_router)
+app.include_router(esmm_router)
 
 
 @app.on_event("startup")
