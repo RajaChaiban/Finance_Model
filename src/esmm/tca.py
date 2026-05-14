@@ -72,10 +72,11 @@ def attribute_pnl(
         fees += fee_dollars
 
         if fill.is_hedge:
-            # Hedge fills are *expected* to underperform spread capture; we
-            # attribute the spread-capture loss to hedge_pnl rather than
-            # leaving it in spread_capture.
-            hedge_pnl += -edge_per_share * fill.size
+            # Move the edge contribution from spread_capture to hedge_pnl.
+            # edge_per_share is signed (negative when we paid above fair, as
+            # a hedge typically does), so the same value goes into both
+            # buckets — out of spread, into hedge.
+            hedge_pnl += edge_per_share * fill.size
             spread_capture -= edge_per_share * fill.size
 
         # adverse selection markout
