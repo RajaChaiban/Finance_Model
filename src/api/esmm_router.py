@@ -15,11 +15,14 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.esmm import persistence
 from src.esmm.backtest import run_backtest
 from src.esmm.crb import CentralRiskBook
 from src.esmm.inventory import InventoryBook
 from src.esmm.quote_engine import QuoteEngine
 from src.esmm.schemas import (
+    CRBBookFlow,
+    CRBBookResult,
     CRBInternalisationResult,
     Fill,
     MarketMakingConfig,
@@ -53,6 +56,26 @@ class BacktestResponse(BaseModel):
     total_pnl: float
     tca: TCABreakdown
     mid_path_sample: list[tuple[float, float]]  # downsampled to ≤ 100 points for UI
+    inventory_path_sample: list[tuple[float, float]]
+    saved_id: Optional[str] = None  # set when ESMM_PERSIST=1
+
+
+class CRBBookRequest(BaseModel):
+    snapshots: list[OrderBookSnapshot]  # one per symbol
+    flows: list[CRBBookFlow]
+    internalisation_cap_pct: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class BacktestRecordView(BaseModel):
+    id: str
+    created_ts: float
+    symbol: str
+    n_quotes: int
+    n_fills: int
+    total_pnl: float
+    final_inventory: float
+    config: dict
+    tca: dict
 
 
 class QuoteRequest(BaseModel):
@@ -92,9 +115,20 @@ def backtest(request: BacktestRequest) -> BacktestResponse:
     if result.tca is None:
         raise HTTPException(status_code=500, detail="TCA was not produced")
 
-    # Downsample mid_path to ≤ 100 points for transport
+    # Downsample mid_path + inventory_path to ≤ 100 points for transport
     step = max(1, len(result.mid_path) // 100)
     mid_sample = result.mid_path[::step]
+    inv_sample = result.inventory_path[::step]
+
+    saved_id = persistence.save_backtest(
+        symbol=request.config.symbol,
+        config=request.config.model_dump(),
+        tca=result.tca,
+        n_quotes=result.n_quotes,
+        n_fills=result.n_fills,
+        total_pnl=result.total_pnl,
+        final_inventory=result.final_inventory,
+    )
 
     return BacktestResponse(
         n_quotes=result.n_quotes,
@@ -106,7 +140,32 @@ def backtest(request: BacktestRequest) -> BacktestResponse:
         total_pnl=result.total_pnl,
         tca=TCABreakdown(**result.tca),
         mid_path_sample=mid_sample,
+        inventory_path_sample=inv_sample,
+        saved_id=saved_id,
     )
+
+
+@router.post("/crb/internalise-book", response_model=CRBBookResult)
+def crb_internalise_book(request: CRBBookRequest) -> CRBBookResult:
+    crb = CentralRiskBook(internalisation_cap_pct=request.internalisation_cap_pct)
+    snaps_by_symbol = {s.symbol: s for s in request.snapshots}
+    return crb.internalise_book(snaps_by_symbol, request.flows)
+
+
+@router.get("/backtests", response_model=list[BacktestRecordView])
+def list_backtests(limit: int = 50) -> list[BacktestRecordView]:
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=422, detail="limit must be in [1, 500]")
+    records = persistence.list_backtests(limit=limit)
+    return [BacktestRecordView(**r.__dict__) for r in records]
+
+
+@router.get("/backtests/{record_id}", response_model=BacktestRecordView)
+def get_backtest(record_id: str) -> BacktestRecordView:
+    record = persistence.get_backtest(record_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"backtest {record_id} not found")
+    return BacktestRecordView(**record.__dict__)
 
 
 @router.post("/quote", response_model=Quote)

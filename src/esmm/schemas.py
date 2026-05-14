@@ -104,6 +104,10 @@ class MarketMakingConfig(BaseModel):
     fee_bps: float = -0.2  # negative = maker rebate
     delta_hedge_threshold: float = 50.0  # |net delta| > threshold → trigger hedge
     delta_hedge_band: float = 10.0  # hedge down to this level
+    # Gamma hedging — only used by AutoHedger.evaluate_with_gamma. Default 0
+    # disables it (delta-only behaviour matches v1).
+    gamma_hedge_threshold: float = 0.0  # |net gamma * S^2| > threshold → trigger
+    gamma_hedge_band: float = 0.0  # hedge gamma exposure back to this band
 
 
 class CRBInternalisationResult(BaseModel):
@@ -116,6 +120,30 @@ class CRBInternalisationResult(BaseModel):
     internalised: float  # quantity netted internally
     residual_to_street: float  # signed — positive = need to buy on street
     estimated_savings_bps: float
+
+
+class CRBBookFlow(BaseModel):
+    """One row of incoming flow across the firm in a single time slot."""
+
+    model_config = ConfigDict(frozen=True)
+    symbol: str
+    incoming_buys: float
+    incoming_sells: float
+    street_spread_bps: float = Field(
+        default=10.0,
+        description="Estimated street bid-offer spread in bps; defaults to 10",
+    )
+
+
+class CRBBookResult(BaseModel):
+    """Aggregate CRB internalisation across a multi-symbol book."""
+
+    model_config = ConfigDict(frozen=True)
+    per_symbol: list[CRBInternalisationResult]
+    total_internalised_notional: float = 0.0
+    total_residual_buy_notional: float = 0.0
+    total_residual_sell_notional: float = 0.0
+    total_estimated_savings_bps_weighted: float = 0.0
 
 
 class TCABreakdown(BaseModel):

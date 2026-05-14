@@ -2733,3 +2733,335 @@ details[open] .vd-briefing-desk-chevron {
   .memo-modal-verdict { font-size: 1.45rem; }
   .memo-modal-validator-list li { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   eSMM Lab — listed-options market-making research panel
+   All rules scoped to .esmm- prefix to avoid global collisions.
+   ============================================================ */
+.esmm-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  padding: 24px 0;
+}
+
+.esmm-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+.esmm-title {
+  font-size: 1.85rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+.esmm-subtitle {
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+}
+.esmm-pill {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.esmm-grid {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 1080px) {
+  .esmm-grid { grid-template-columns: 1fr; }
+}
+
+.esmm-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-md);
+}
+.esmm-card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.esmm-card-title {
+  font-size: 1.08rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 6px 0;
+}
+.esmm-card-sub {
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  margin: 0 0 18px 0;
+  line-height: 1.55;
+}
+.esmm-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 42px 22px;
+}
+
+/* ----- config form ----- */
+.esmm-cfg-symbol {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.esmm-cfg-symbol label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.esmm-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 9px 12px;
+  font-size: 0.92rem;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-weight: 600;
+  transition: var(--transition);
+}
+.esmm-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus);
+}
+.esmm-input-sm {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  font-family: inherit;
+}
+.esmm-input-sm:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: var(--shadow-focus);
+}
+
+.esmm-cfg-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--border);
+}
+.esmm-cfg-row:last-of-type {
+  border-bottom: none;
+}
+.esmm-cfg-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.esmm-cfg-value {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+}
+.esmm-cfg-hint {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.esmm-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+.esmm-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+  transition: var(--transition);
+}
+.esmm-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+.esmm-slider::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  background: var(--accent);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+/* ----- buttons ----- */
+.esmm-btn-primary {
+  width: 100%;
+  margin-top: 20px;
+  padding: 12px 16px;
+  background: var(--accent-gradient);
+  color: var(--text-inverse);
+  border: none;
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: var(--transition);
+  letter-spacing: 0.02em;
+}
+.esmm-btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-lg);
+}
+.esmm-btn-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.esmm-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.esmm-btn-ghost:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-focus);
+  color: var(--accent);
+}
+.esmm-error {
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* ----- headline cards ----- */
+.esmm-headline-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.esmm-headline-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+  transition: var(--transition);
+}
+.esmm-headline-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+.esmm-headline-positive {
+  border-color: var(--success);
+  background: linear-gradient(135deg, var(--success-soft), var(--bg-surface));
+}
+.esmm-headline-negative {
+  border-color: var(--danger);
+  background: linear-gradient(135deg, var(--danger-soft), var(--bg-surface));
+}
+.esmm-headline-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.esmm-headline-value {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  letter-spacing: -0.02em;
+  margin-top: 4px;
+}
+.esmm-headline-positive .esmm-headline-value { color: var(--success); }
+.esmm-headline-negative .esmm-headline-value { color: var(--danger); }
+
+/* ----- CRB simulator ----- */
+.esmm-crb-card {
+  margin-top: 8px;
+}
+.esmm-crb-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 0.86rem;
+}
+.esmm-crb-table th {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border);
+}
+.esmm-crb-table td {
+  padding: 6px 8px;
+  border-bottom: 1px dashed var(--border);
+}
+.esmm-crb-table td:last-child {
+  width: 32px;
+  text-align: center;
+}
+.esmm-crb-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  align-items: end;
+  margin-top: 16px;
+}
+.esmm-crb-controls .esmm-btn-primary {
+  width: auto;
+  padding: 10px 24px;
+  margin-top: 0;
+}
+.esmm-crb-results {
+  margin-top: 18px;
+}

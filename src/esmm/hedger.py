@@ -62,3 +62,57 @@ class AutoHedger:
             is_hedge=True,
             counterparty="hedge_venue",
         )
+
+    def evaluate_with_gamma(
+        self,
+        ts: float,
+        net_delta: float,
+        net_gamma_dollar: float,
+        hedge_price: float,
+        hedge_fee_bps: float = 1.0,
+    ) -> list[Fill]:
+        """Evaluate both delta and gamma triggers together.
+
+        Args:
+            net_gamma_dollar: gamma exposure in dollar terms — typically
+                gamma * S^2 (the actual P&L impact of a 1% spot move).
+                Use 0 to disable; a positive value means a 1% spot move
+                in either direction adds gamma_dollar to inventory exposure.
+
+        Returns a list of Fills (0, 1, or 2 — both triggers can fire).
+
+        Gamma hedging in production is more complex (you'd typically buy or
+        sell options, not the underlier, to hedge gamma). For the lab we
+        model the simpler case: gamma above threshold triggers an additional
+        delta-style trade in the same hedge instrument, sized to bring
+        gamma_dollar back to the band.
+        """
+        fills: list[Fill] = []
+        delta_fill = self.evaluate(ts=ts, net_delta=net_delta, hedge_price=hedge_price, hedge_fee_bps=hedge_fee_bps)
+        if delta_fill is not None:
+            fills.append(delta_fill)
+
+        gamma_threshold = self.config.gamma_hedge_threshold
+        gamma_band = self.config.gamma_hedge_band
+        if gamma_threshold > 0 and abs(net_gamma_dollar) > gamma_threshold:
+            target = gamma_band if net_gamma_dollar > 0 else -gamma_band
+            # Convert dollar gamma surplus back to a notional trade, divided
+            # by hedge_price^2 to get share count. This is a simplification:
+            # a real desk would source gamma via options.
+            gamma_notional_excess = abs(net_gamma_dollar - target)
+            size = gamma_notional_excess / max(hedge_price, 1e-9)
+            side = Side.SELL if net_gamma_dollar > 0 else Side.BUY
+            fills.append(
+                Fill(
+                    ts=ts,
+                    symbol=self.hedge_symbol,
+                    side=side,
+                    price=hedge_price,
+                    size=size,
+                    fair_value_at_fill=hedge_price,
+                    fee_bps=hedge_fee_bps,
+                    is_hedge=True,
+                    counterparty="gamma_hedge_venue",
+                )
+            )
+        return fills

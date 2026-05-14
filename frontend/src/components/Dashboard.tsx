@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { ConfigForm } from "./ConfigForm";
 import { ReportDisplay } from "./ReportDisplay";
 import { CopilotPanel } from "./CopilotPanel";
+import { EsmmLabPanel } from "./EsmmLabPanel";
 import { Header } from "./Header";
 import { IndexTickerStrip } from "./IndexTickerStrip";
 import { MoversGrid } from "./MoversGrid";
@@ -10,7 +11,7 @@ import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
 import { useMarketMovers } from "../hooks/useMarketMovers";
 
-type Mode = "pricer" | "copilot";
+type Mode = "pricer" | "copilot" | "esmm";
 
 // Index tickers (^GSPC, ^IXIC, ...) aren't valid yfinance lookups for
 // dividend yield and aren't what gets traded — desks price index options
@@ -168,7 +169,7 @@ export function Dashboard() {
       </section>
 
       <div className="main-content" ref={configRef}>
-        {/* Mode Switcher: Quick Pricer (existing) vs Structuring Co-pilot (new) */}
+        {/* Mode Switcher: Quick Pricer (existing) vs Structuring Co-pilot vs eSMM Lab */}
         <div className="mode-switcher">
           <button
             className={`mode-btn ${mode === "pricer" ? "active" : ""}`}
@@ -182,10 +183,18 @@ export function Dashboard() {
           >
             Structuring Co-pilot
           </button>
+          <button
+            className={`mode-btn ${mode === "esmm" ? "active" : ""}`}
+            onClick={() => setMode("esmm")}
+          >
+            eSMM Lab
+          </button>
         </div>
 
         {mode === "copilot" ? (
           <CopilotPanel />
+        ) : mode === "esmm" ? (
+          <EsmmLabPanel />
         ) : (
         <>
         {/* Step Indicator */}
