@@ -25,6 +25,7 @@ from src.esmm import persistence
 from src.esmm.adapters import (
     AlpacaAdapter,
     DataAdapter,
+    IBKRAdapter,
     SyntheticAdapter,
     TradierAdapter,
     YFinanceAdapter,
@@ -53,6 +54,7 @@ _ADAPTER_REGISTRY: dict[str, type] = {
     "yfinance": YFinanceAdapter,
     "alpaca": AlpacaAdapter,
     "tradier": TradierAdapter,
+    "ibkr": IBKRAdapter,
 }
 
 router = APIRouter(prefix="/api/esmm", tags=["esmm"])

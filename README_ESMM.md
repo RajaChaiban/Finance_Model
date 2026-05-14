@@ -35,8 +35,9 @@ map are not yet wired.
 | `YFinanceAdapter` (real Yahoo bars, free, no key) | `src/esmm/adapters/yfinance_adapter.py` | ✅ |
 | `AlpacaAdapter` (real SIP NBBO, free w/ brokerage signup) | `src/esmm/adapters/alpaca_adapter.py` | ✅ (soft-import `alpaca-py`) |
 | `TradierAdapter` (sandbox REST: bars + live L1 quotes) | `src/esmm/adapters/tradier_adapter.py` | ✅ |
+| `IBKRAdapter` (TWS / IB Gateway, BID/ASK historical bars) | `src/esmm/adapters/ibkr_adapter.py` | ✅ (soft-import `ib_insync`) |
 | `POST /backtest/snapshots` + `/backtest/live` + `GET /adapters` | `src/api/esmm_router.py` | ✅ |
-| IBKR / Databento (L2 + paper trading) | — | ❌ TODO |
+| Databento (L2 / MBP-10) | — | ❌ TODO |
 | Per-leg option Greeks in `AutoHedger` | — | ❌ TODO |
 | Live quoting against a real venue | — | ❌ TODO |
 
