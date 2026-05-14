@@ -20,11 +20,13 @@ Future:
 from src.esmm.adapters.alpaca_adapter import AlpacaAdapter
 from src.esmm.adapters.base import DataAdapter
 from src.esmm.adapters.synthetic_adapter import SyntheticAdapter
+from src.esmm.adapters.tradier_adapter import TradierAdapter
 from src.esmm.adapters.yfinance_adapter import YFinanceAdapter
 
 __all__ = [
     "AlpacaAdapter",
     "DataAdapter",
     "SyntheticAdapter",
+    "TradierAdapter",
     "YFinanceAdapter",
 ]

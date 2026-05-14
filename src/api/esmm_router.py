@@ -26,6 +26,7 @@ from src.esmm.adapters import (
     AlpacaAdapter,
     DataAdapter,
     SyntheticAdapter,
+    TradierAdapter,
     YFinanceAdapter,
 )
 from src.esmm.backtest import run_backtest
@@ -51,6 +52,7 @@ _ADAPTER_REGISTRY: dict[str, type] = {
     "synthetic": SyntheticAdapter,
     "yfinance": YFinanceAdapter,
     "alpaca": AlpacaAdapter,
+    "tradier": TradierAdapter,
 }
 
 router = APIRouter(prefix="/api/esmm", tags=["esmm"])

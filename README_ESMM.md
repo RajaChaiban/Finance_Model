@@ -34,8 +34,8 @@ map are not yet wired.
 | `SyntheticAdapter` (GBM, no network) | `src/esmm/adapters/synthetic_adapter.py` | ✅ |
 | `YFinanceAdapter` (real Yahoo bars, free, no key) | `src/esmm/adapters/yfinance_adapter.py` | ✅ |
 | `AlpacaAdapter` (real SIP NBBO, free w/ brokerage signup) | `src/esmm/adapters/alpaca_adapter.py` | ✅ (soft-import `alpaca-py`) |
+| `TradierAdapter` (sandbox REST: bars + live L1 quotes) | `src/esmm/adapters/tradier_adapter.py` | ✅ |
 | `POST /backtest/snapshots` + `/backtest/live` + `GET /adapters` | `src/api/esmm_router.py` | ✅ |
-| Tradier (options-chain ingest) | — | ❌ TODO |
 | IBKR / Databento (L2 + paper trading) | — | ❌ TODO |
 | Per-leg option Greeks in `AutoHedger` | — | ❌ TODO |
 | Live quoting against a real venue | — | ❌ TODO |
