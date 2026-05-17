@@ -228,3 +228,30 @@ def test_geometric_asian_below_european():
     assert p_geo < p_eur, (
         f"Asian should be cheaper than European: asian={p_geo:.4f}, eur={p_eur:.4f}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Regression: theta sign for geometric asian put must be negative
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("opt", ["call", "put"])
+@pytest.mark.parametrize("method", ["geometric", "arithmetic"])
+def test_theta_sign_negative(opt, method):
+    """Theta must be <= 0 for all Asian variants (long options decay in value over time).
+
+    Regression for a bug where greeks_asian advanced the evaluation date by one
+    day but rebuilt the fixing schedule from the new today, dropping one fixing.
+    For a geometric Asian put, fewer fixings raised the option value enough to
+    flip theta positive.  The fix pins the fixing schedule across the bump so
+    the delta measures pure time-passage only.
+    """
+    S, K, r, sigma, T, q = 100.0, 100.0, 0.05, 0.20, 1.0, 0.0
+    n_paths = 10000 if method == "arithmetic" else 1
+    g = asian.greeks_asian(
+        S, K, r, sigma, T, q,
+        option_type=opt, averaging_method=method, averaging_frequency="daily",
+        n_paths=n_paths,
+    )
+    assert g["theta"] <= 0.0, (
+        f"asian {method} {opt}: theta={g['theta']:.8f} should be <= 0 (time decay)"
+    )

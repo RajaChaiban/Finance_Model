@@ -89,6 +89,7 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
                 n_paths: int = 50000,
                 evaluation_date: "Optional[ql.Date]" = None,
                 maturity_date: "Optional[ql.Date]" = None,
+                fixing_dates: "Optional[List[ql.Date]]" = None,
                 ) -> Tuple[float, float, None]:
     """Price a fixed-strike, average-price Asian option.
 
@@ -105,6 +106,12 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
             schedule structure) constant — bumping T directly would also drop
             a fixing from the schedule, which conflates time decay with a
             contract change.
+        fixing_dates: Pre-built list of fixing dates. When supplied, overrides
+            the schedule built from evaluation_date/averaging_frequency. Used
+            by ``greeks_asian`` to hold the fixing schedule constant across the
+            theta bump so that advancing the evaluation date does not remove
+            fixings from the schedule (which would conflate a structural contract
+            change with pure time decay and invert the theta sign).
 
     Returns:
         (price, std_error, None). std_error == 0.0 for the geometric closed form.
@@ -121,7 +128,8 @@ def price_asian(S: float, K: float, r: float, sigma: float, T: float,
 
     payoff = _resolve_payoff(option_type, K)
     exercise = ql.EuropeanExercise(maturity)
-    fixing_dates = _build_fixing_schedule(today, maturity, averaging_frequency)
+    if fixing_dates is None:
+        fixing_dates = _build_fixing_schedule(today, maturity, averaging_frequency)
 
     if method == "geometric":
         # runningAccumulator = 1.0 (multiplicative identity), pastFixings = 0
@@ -190,6 +198,15 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
     today = ql.Date.todaysDate()
     maturity = today + _days_from_T(T)
 
+    # Build the fixing schedule once from today so that all reprices — including
+    # the theta bump — use identical fixing dates.  Advancing the eval date by 1
+    # inside price_asian would otherwise call _build_fixing_schedule(today+1, ...)
+    # which drops the first upcoming fixing, reducing the sample count.  For a
+    # geometric Asian put this structural change *raises* the option value and
+    # produces a spuriously positive theta.  Pinning the schedule here isolates
+    # pure time-passage from contract-structure changes.
+    base_fixing_dates = _build_fixing_schedule(today, maturity, averaging_frequency)
+
     def px(S_, r_, sigma_, T_unused_, q_) -> float:
         p, _, _ = price_asian(
             S_, K, r_, sigma_, T, q_,  # T forwarded but maturity_date overrides
@@ -199,6 +216,7 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
             n_paths=n_paths,
             evaluation_date=today,
             maturity_date=maturity,
+            fixing_dates=base_fixing_dates,
         )
         return p
 
@@ -216,9 +234,9 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
     p_vd = px(S, r, sigma - vol_bump, T, q)
     vega = (p_vu - p_vd) / (2 * vol_bump) / 100.0
 
-    # Theta: advance eval date by 1 day, keep maturity. p_tomorrow uses the
-    # SAME contract (same maturity date, same fixing schedule) seen from one
-    # day later — pure time-passage effect.
+    # Theta: advance eval date by 1 day, keep maturity AND fixing schedule.
+    # Passing base_fixing_dates ensures the same fixing count for both prices,
+    # isolating pure time-decay from the schedule-shrinkage effect.
     p_tomorrow, _, _ = price_asian(
         S, K, r, sigma, T, q,
         option_type=option_type,
@@ -227,6 +245,7 @@ def greeks_asian(S: float, K: float, r: float, sigma: float, T: float,
         n_paths=n_paths,
         evaluation_date=today + 1,
         maturity_date=maturity,
+        fixing_dates=base_fixing_dates,
     )
     theta = p_tomorrow - price_base
 
