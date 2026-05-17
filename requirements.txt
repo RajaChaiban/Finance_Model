@@ -21,3 +21,6 @@ reportlab>=4.0
 chromadb>=0.4
 sentence-transformers>=2.2
 loguru>=0.7
+
+# Property-based testing — used by tests/esmm/sim/test_lob_properties.py
+hypothesis>=6.0
