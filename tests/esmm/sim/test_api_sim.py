@@ -126,3 +126,65 @@ class TestSandboxEndpoint:
         # they fill — but with no aggressors they stay flat.
         assert "pnl_per_participant" in body
         assert "inventory_per_participant" in body
+
+
+class TestArenaEndpoint:
+    def test_empty_strategies_rejected(self) -> None:
+        r = client.post(
+            "/api/esmm/sim/arena",
+            json={
+                "kernel": {
+                    "duration_sec": 0.05,
+                    "tick_interval_sec": 0.001,
+                    "enable_latency": False,
+                },
+                "flow": [],
+                "strategies": [],
+            },
+        )
+        assert r.status_code == 400
+
+    def test_unknown_strategy_kind_rejected(self) -> None:
+        r = client.post(
+            "/api/esmm/sim/arena",
+            json={
+                "kernel": {
+                    "duration_sec": 0.05,
+                    "tick_interval_sec": 0.001,
+                    "enable_latency": False,
+                },
+                "flow": [],
+                "strategies": [
+                    {
+                        "strategy_id": "alpha",
+                        "participant": {"kind": "alien", "weight": 1.0, "params": {}},
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 400
+
+
+class TestAgenticEndpoint:
+    def test_503_when_market_maker_not_registered(self) -> None:
+        # If MarketMakerParticipant hasn't been registered yet, the
+        # endpoint should return 503 with a clear message rather than
+        # 500.
+        from src.api.esmm_sim_router import _PARTICIPANT_REGISTRY
+
+        if "market_maker" in _PARTICIPANT_REGISTRY:
+            # MM is registered — skip this test
+            return
+
+        r = client.post(
+            "/api/esmm/sim/agentic",
+            json={
+                "scenario_id": "hot_cpi",
+                "baseline_config": {"symbol": "SPY"},
+                "flow": [],
+                "max_iterations": 2,
+                "duration_override_sec": 0.05,
+            },
+        )
+        assert r.status_code == 503
+        assert "MarketMakerParticipant" in r.json()["detail"]

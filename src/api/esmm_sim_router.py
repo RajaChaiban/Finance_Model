@@ -269,4 +269,200 @@ def run_sandbox(req: SandboxRequest) -> SandboxResponse:
     )
 
 
+# ---------------------------------------------------------------------------
+# Arena bake-off endpoint
+# ---------------------------------------------------------------------------
+class ArenaStrategyBody(BaseModel):
+    """One strategy entry in an arena bake-off.
+
+    The strategy is constructed as a single participant from the registry,
+    just like Sandbox participants. Different strategies usually share
+    the same kind (e.g. all "mm") with different ``params``.
+    """
+
+    strategy_id: str
+    participant: ParticipantSpecBody
+
+
+class ArenaRequest(BaseModel):
+    kernel: KernelConfigBody
+    latency: Optional[LatencyConfigBody] = None
+    flow: list[ParticipantSpecBody] = Field(default_factory=list)
+    strategies: list[ArenaStrategyBody]
+    risk: Optional[dict[str, float]] = None
+
+
+class ArenaStrategyResponse(BaseModel):
+    strategy_id: str
+    pnl: float
+    final_inventory: float
+    n_fills: int
+    n_orders_submitted: int
+    sharpe_approx: float
+    max_drawdown: float
+    edge_over_passive: float
+    halted_at: Optional[float] = None
+
+
+class ArenaResponse(BaseModel):
+    run_id: str
+    strategies: list[str]
+    per_strategy: list[ArenaStrategyResponse]
+    comparison: dict[str, Any]
+
+
+@router.post("/arena", response_model=ArenaResponse)
+def run_arena(req: ArenaRequest) -> ArenaResponse:
+    if not req.strategies:
+        raise HTTPException(status_code=400, detail="At least one strategy is required")
+
+    kc = _kernel_config_from_body(req.kernel)
+    latency_cfg = _latency_from_body(req.latency, kc.seed)
+    risk_limits = _risk_from_dict(req.risk)
+
+    def flow_factory(_kc) -> list[Participant]:
+        return [_build_participant(spec) for spec in req.flow]
+
+    strategy_factories = {}
+    for entry in req.strategies:
+        # Captured per-iter to avoid late-binding issues.
+        def _make(_kc, _spec=entry.participant):
+            # Stamp the strategy_id as the participant_id so downstream
+            # bookkeeping is consistent.
+            params = dict(_spec.params)
+            params["participant_id"] = entry.strategy_id
+            return _build_participant(
+                ParticipantSpecBody(kind=_spec.kind, weight=_spec.weight, params=params)
+            )
+
+        strategy_factories[entry.strategy_id] = _make
+
+    arena = Arena(
+        config=ArenaConfig(
+            kernel_config=kc,
+            latency_config=latency_cfg,
+            risk_limits=risk_limits,
+            seed=kc.seed,
+            flow_factory=flow_factory,
+        ),
+        strategies=strategy_factories,
+    )
+    result = arena.run()
+    return ArenaResponse(
+        run_id=result.run_id,
+        strategies=result.strategies,
+        per_strategy=[
+            ArenaStrategyResponse(**s.to_dict()) for s in result.per_strategy
+        ],
+        comparison=result.comparison,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Agentic loop endpoint
+# ---------------------------------------------------------------------------
+class AgenticRequest(BaseModel):
+    scenario_id: str
+    baseline_config: dict[str, Any]
+    flow: list[ParticipantSpecBody] = Field(default_factory=list)
+    acceptance_score: float = 70.0
+    max_iterations: int = 5
+    base_seed: int = 42
+    duration_override_sec: Optional[float] = None
+
+
+class AgenticIterationResponse(BaseModel):
+    iteration: int
+    regime: str
+    score: float
+    accepted: bool
+    proposed_config: dict[str, Any]
+    total_pnl: float
+    spread_capture_pnl: float
+    adverse_selection_pnl: float
+    hedge_pnl: float
+    inventory_pnl: float
+    fees_pnl: float
+
+
+class AgenticResponse(BaseModel):
+    converged: bool
+    stopped_reason: str
+    iterations: list[AgenticIterationResponse]
+    best_iteration: Optional[int] = None
+    best_score: Optional[float] = None
+
+
+@router.post("/agentic", response_model=AgenticResponse)
+def run_agentic_loop(req: AgenticRequest) -> AgenticResponse:
+    """Run the agentic observe→propose→score loop against a scenario."""
+    from src.agents.esmm.sim_orchestrator import AgenticSimOrchestrator
+    from src.esmm.schemas import MarketMakingConfig
+
+    # We need an MM participant kind in the registry. Surface a clear
+    # error if the v1 MarketMakerParticipant hasn't landed yet.
+    if "market_maker" not in _PARTICIPANT_REGISTRY:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "MarketMakerParticipant not registered. Phase-4 v1 not yet "
+                "deployed. Expected kind='market_maker' in the participant registry."
+            ),
+        )
+
+    baseline = MarketMakingConfig(**req.baseline_config)
+
+    def mm_factory(cfg: MarketMakingConfig) -> Participant:
+        return _PARTICIPANT_REGISTRY["market_maker"](
+            {"participant_id": "mm", "config": cfg}
+        )
+
+    def flow_factory(_kc, _sc) -> list[Participant]:
+        return [_build_participant(spec) for spec in req.flow]
+
+    orch = AgenticSimOrchestrator(
+        baseline=baseline,
+        mm_factory=mm_factory,
+        flow_factory=flow_factory,
+        acceptance_score=req.acceptance_score,
+        max_iterations=req.max_iterations,
+        base_seed=req.base_seed,
+        duration_override_sec=req.duration_override_sec,
+    )
+    run_result = orch.run(req.scenario_id)
+
+    iter_rows = []
+    for d in run_result.history:
+        iter_rows.append(
+            AgenticIterationResponse(
+                iteration=d.iteration,
+                regime=d.observation.regime.value,
+                score=d.score.score,
+                accepted=d.accepted,
+                proposed_config=d.proposal.config.model_dump(),
+                total_pnl=d.tca.total_pnl,
+                spread_capture_pnl=d.tca.spread_capture_pnl,
+                adverse_selection_pnl=d.tca.adverse_selection_pnl,
+                hedge_pnl=d.tca.hedge_pnl,
+                inventory_pnl=d.tca.inventory_pnl,
+                fees_pnl=d.tca.fees_pnl,
+            )
+        )
+
+    best_idx = (
+        run_result.best_decision.iteration if run_result.best_decision else None
+    )
+    best_score = (
+        run_result.best_decision.score.score if run_result.best_decision else None
+    )
+
+    return AgenticResponse(
+        converged=run_result.converged,
+        stopped_reason=run_result.stopped_reason,
+        iterations=iter_rows,
+        best_iteration=best_idx,
+        best_score=best_score,
+    )
+
+
 __all__ = ["router", "register_participant"]
