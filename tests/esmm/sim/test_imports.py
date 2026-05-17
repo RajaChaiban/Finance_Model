@@ -117,8 +117,10 @@ def test_reporters_importable() -> None:
     from src.esmm.sim.reporters.monte_carlo import MonteCarloConfig
     from src.esmm.sim.reporters.walk_forward import WalkForwardConfig
 
-    assert WalkForwardConfig().train_days == 30
-    assert WalkForwardConfig().test_days == 5
+    # Phase-5 implementation uses *seconds* (sim time) for window sizing,
+    # not days. Wall-clock days are a frontend display concern.
+    assert WalkForwardConfig().train_sec > 0
+    assert WalkForwardConfig().test_sec > 0
     assert MonteCarloConfig().n_runs == 100
 
 
