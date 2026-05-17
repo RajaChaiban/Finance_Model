@@ -115,6 +115,42 @@ def _try_register_known_participants() -> None:
     except Exception:
         pass
 
+    try:
+        from src.esmm.sim.participants.momentum import MomentumTaker  # type: ignore
+
+        def _momentum_factory(params: dict[str, Any]) -> Participant:
+            return MomentumTaker(
+                participant_id=params.pop("participant_id", "momentum"), **params
+            )
+
+        register_participant("momentum", _momentum_factory)
+    except Exception:
+        pass
+
+    try:
+        from src.esmm.sim.participants.mean_reverter import MeanReverter  # type: ignore
+
+        def _mr_factory(params: dict[str, Any]) -> Participant:
+            return MeanReverter(
+                participant_id=params.pop("participant_id", "mean_reverter"), **params
+            )
+
+        register_participant("mean_reverter", _mr_factory)
+    except Exception:
+        pass
+
+    try:
+        from src.esmm.sim.participants.news_shock import NewsShock  # type: ignore
+
+        def _news_factory(params: dict[str, Any]) -> Participant:
+            return NewsShock(
+                participant_id=params.pop("participant_id", "news_shock"), **params
+            )
+
+        register_participant("news_shock", _news_factory)
+    except Exception:
+        pass
+
 
 _try_register_known_participants()
 
