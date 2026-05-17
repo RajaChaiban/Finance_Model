@@ -92,6 +92,29 @@ def _try_register_known_participants() -> None:
     except Exception:
         pass
 
+    try:
+        from src.esmm.schemas import MarketMakingConfig as _MMConfig  # type: ignore
+        from src.esmm.sim.participants.market_maker import (  # type: ignore
+            MarketMakerParticipant,
+        )
+
+        def _mm_factory(params: dict[str, Any]) -> Participant:
+            pid = params.pop("participant_id", "mm")
+            cfg = params.pop("config", None)
+            if cfg is None:
+                # Build config from any remaining params (raw dict).
+                cfg = _MMConfig(**params)
+                params = {}
+            elif isinstance(cfg, dict):
+                cfg = _MMConfig(**cfg)
+            return MarketMakerParticipant(
+                participant_id=pid, config=cfg, **params
+            )
+
+        register_participant("market_maker", _mm_factory)
+    except Exception:
+        pass
+
 
 _try_register_known_participants()
 
