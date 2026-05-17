@@ -1,8 +1,8 @@
-"""Tests for the phase-2 participant archetypes.
+"""Tests for the three phase-2 participant archetypes.
 
-Covers :class:`~src.esmm.sim.participants.noise.NoiseTrader` and
-:class:`~src.esmm.sim.participants.informed.InformedTrader`. A subsequent
-commit adds ReplayTaker coverage.
+Covers :class:`~src.esmm.sim.participants.noise.NoiseTrader`,
+:class:`~src.esmm.sim.participants.informed.InformedTrader`, and
+:class:`~src.esmm.sim.participants.replay_taker.ReplayTaker`.
 
 These participants are pure objects — no kernel wiring — so the tests
 exercise them by hand-feeding snapshots and timestamps. Stochastic
@@ -22,6 +22,7 @@ from src.esmm.sim.lob import Order, OrderSide, OrderType
 from src.esmm.sim.participants.base import Participant
 from src.esmm.sim.participants.informed import InformedTrader
 from src.esmm.sim.participants.noise import NoiseTrader
+from src.esmm.sim.participants.replay_taker import ReplayTaker
 
 
 # ---------------------------------------------------------------------
@@ -75,6 +76,11 @@ def test_noise_trader_is_a_participant() -> None:
 def test_informed_trader_is_a_participant() -> None:
     it = InformedTrader("inf1", "SPY", future_mid_provider=lambda t: 100.0, seed=0)
     assert isinstance(it, Participant)
+
+
+def test_replay_taker_is_a_participant() -> None:
+    rt = ReplayTaker("rep1", "SPY", events=[])
+    assert isinstance(rt, Participant)
 
 
 # =====================================================================
@@ -375,3 +381,121 @@ def test_informed_trader_rejects_bad_config() -> None:
         InformedTrader(
             "x", "SPY", future_mid_provider=lambda t: 100.0, signal_noise_bps=-1.0
         )
+
+
+# =====================================================================
+# ReplayTaker
+# =====================================================================
+def test_replay_taker_emits_events_in_order() -> None:
+    """Walking time forward one event at a time emits each in turn."""
+    events = [(0.1, "buy", 100.0), (0.2, "sell", 200.0), (0.3, "buy", 50.0)]
+    rt = ReplayTaker("rep", "SPY", events=events)
+
+    out = rt.decide(0.05)
+    assert out == []  # nothing has triggered yet
+
+    out = rt.decide(0.1)
+    assert len(out) == 1
+    assert out[0].side == OrderSide.BUY
+    assert out[0].size == 100.0
+    assert out[0].order_type == OrderType.MARKET
+    assert math.isnan(out[0].price)
+    assert out[0].owner_id == "rep"
+    assert out[0].symbol == "SPY"
+    assert out[0].order_id == 0
+    assert out[0].ts == 0.1
+
+    out = rt.decide(0.2)
+    assert len(out) == 1
+    assert out[0].side == OrderSide.SELL
+    assert out[0].size == 200.0
+
+    out = rt.decide(0.3)
+    assert len(out) == 1
+    assert out[0].side == OrderSide.BUY
+    assert out[0].size == 50.0
+
+    # Nothing left.
+    assert rt.decide(1.0) == []
+
+
+def test_replay_taker_flushes_multiple_events_on_jump() -> None:
+    """A big time-jump emits every event whose ts <= now in one call."""
+    events = [
+        (0.1, "buy", 10.0),
+        (0.2, "sell", 20.0),
+        (0.3, "buy", 30.0),
+        (0.4, "sell", 40.0),
+    ]
+    rt = ReplayTaker("rep", "SPY", events=events)
+    out = rt.decide(0.35)
+    assert [o.size for o in out] == [10.0, 20.0, 30.0]
+    assert [o.side for o in out] == [
+        OrderSide.BUY,
+        OrderSide.SELL,
+        OrderSide.BUY,
+    ]
+    # The last event still pending.
+    remaining = rt.decide(0.5)
+    assert len(remaining) == 1
+    assert remaining[0].size == 40.0
+
+
+def test_replay_taker_never_reemits() -> None:
+    """Calling decide multiple times at the same ts emits each event exactly once."""
+    events = [(0.1, "buy", 10.0), (0.2, "sell", 20.0)]
+    rt = ReplayTaker("rep", "SPY", events=events)
+    first = rt.decide(1.0)
+    assert len(first) == 2
+    # Subsequent calls — even further in the future — emit nothing.
+    assert rt.decide(2.0) == []
+    assert rt.decide(10.0) == []
+
+
+def test_replay_taker_unsorted_raises() -> None:
+    """Constructor refuses out-of-order tapes."""
+    with pytest.raises(ValueError, match="sorted"):
+        ReplayTaker(
+            "rep",
+            "SPY",
+            events=[(0.1, "buy", 10.0), (0.05, "sell", 5.0)],
+        )
+
+
+def test_replay_taker_rejects_bad_side() -> None:
+    with pytest.raises(ValueError, match="buy"):
+        ReplayTaker("rep", "SPY", events=[(0.1, "hodl", 10.0)])
+
+
+def test_replay_taker_rejects_bad_size() -> None:
+    with pytest.raises(ValueError, match="size"):
+        ReplayTaker("rep", "SPY", events=[(0.1, "buy", 0.0)])
+    with pytest.raises(ValueError, match="size"):
+        ReplayTaker("rep", "SPY", events=[(0.1, "buy", -1.0)])
+
+
+def test_replay_taker_handles_empty_tape() -> None:
+    """No events → decide always returns []."""
+    rt = ReplayTaker("rep", "SPY", events=[])
+    assert rt.decide(0.0) == []
+    assert rt.decide(100.0) == []
+
+
+def test_replay_taker_on_book_and_on_fill_are_noops() -> None:
+    """These methods exist (protocol) but don't change behaviour."""
+    from src.esmm.schemas import Fill, Side
+
+    rt = ReplayTaker("rep", "SPY", events=[(0.1, "buy", 10.0)])
+    rt.on_book(_snap(ts=0.05))
+    rt.on_fill(
+        Fill(
+            ts=0.05,
+            symbol="SPY",
+            side=Side.BUY,
+            price=100.0,
+            size=10.0,
+            fair_value_at_fill=100.0,
+        )
+    )
+    out = rt.decide(0.1)
+    assert len(out) == 1
