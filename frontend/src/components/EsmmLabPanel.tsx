@@ -123,17 +123,29 @@ function ConfigSliderRow(props: {
   );
 }
 
-function HeadlineCard(props: { label: string; value: string; positive?: boolean | null }) {
+function HeadlineCard(props: {
+  label: string;
+  value: string;
+  positive?: boolean | null;
+  delta?: string;
+}) {
   const cls =
     props.positive === true
       ? "esmm-headline-card esmm-headline-positive"
       : props.positive === false
         ? "esmm-headline-card esmm-headline-negative"
         : "esmm-headline-card";
+  const indicator =
+    props.positive === true ? "▲" : props.positive === false ? "▼" : "·";
   return (
     <div className={cls}>
-      <div className="esmm-headline-label">{props.label}</div>
+      <div className="esmm-headline-stripe" aria-hidden />
+      <div className="esmm-headline-row-top">
+        <div className="esmm-headline-label">{props.label}</div>
+        <span className="esmm-headline-indicator">{indicator}</span>
+      </div>
       <div className="esmm-headline-value">{props.value}</div>
+      {props.delta && <div className="esmm-headline-delta">{props.delta}</div>}
     </div>
   );
 }
@@ -268,13 +280,22 @@ export function EsmmLabPanel() {
   return (
     <div className="esmm-panel">
       <div className="esmm-panel-header">
-        <div>
+        <div className="esmm-panel-header-left">
+          <div className="esmm-eyebrow">
+            <span className="esmm-eyebrow-dot" />
+            Research console · {result?.n_quotes ?? "—"} quotes
+          </div>
           <h2 className="esmm-title">eSMM Lab</h2>
           <p className="esmm-subtitle">
-            Listed-options market-making research with central-risk-book simulation
+            Listed-options market-making research with central-risk-book simulation.
           </p>
         </div>
-        <div className="esmm-pill">paper · synthetic L2 · seed-deterministic</div>
+        <div className="esmm-pill-row">
+          <span className="esmm-pill esmm-pill-paper">PAPER</span>
+          <span className="esmm-pill esmm-pill-info">SYNTHETIC L2</span>
+          <span className="esmm-pill esmm-pill-mono">SEED · {run.seed}</span>
+          <span className="esmm-pill esmm-pill-mono">{config.symbol}</span>
+        </div>
       </div>
 
       <div className="esmm-grid">

@@ -23,7 +23,18 @@ async function waitForMoversLoaded(page: Page) {
 }
 
 async function waitForFormReady(page: Page) {
-  await expect(page.getByRole("heading", { name: /Price Your Option/i })).toBeVisible();
+  // The redesigned landing lands on the home workspace selector. If the
+  // pricer form isn't already on screen, click the Quick Pricer
+  // workspace card (or pipeline tab) first.
+  const heading = page.getByRole("heading", { name: /Price Your Option/i });
+  const headingVisible = await heading.isVisible().catch(() => false);
+  if (!headingVisible) {
+    const pricerBtn = page.getByRole("button", { name: /Quick Pricer/i }).first();
+    if (await pricerBtn.isVisible().catch(() => false)) {
+      await pricerBtn.click();
+    }
+  }
+  await expect(heading).toBeVisible();
   await page.waitForFunction(
     () => {
       const inputs = document.querySelectorAll<HTMLInputElement>("input[type=number]");

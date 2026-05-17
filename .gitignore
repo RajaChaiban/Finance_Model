@@ -1,4 +1,8 @@
-# Python
+# =============================================================================
+# .gitignore — keep README.md + architecture.md + main code only
+# =============================================================================
+
+# --- Python ---
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,87 +14,98 @@ ENV/
 .venv
 pip-log.txt
 pip-delete-this-directory.txt
+.coverage
+.coverage.*
+.pytest_cache/
+htmlcov/
 
-# Jupyter/Colab
+# --- Jupyter ---
 .ipynb_checkpoints/
 *.ipynb_checkpoints
+*.ipynb
 .colab
 
-# IDE
+# --- Node / Vite / Frontend build artifacts ---
+node_modules/
+dist/
+build/
+.vite/
+frontend/.vite/
+frontend/dist/
+frontend/node_modules/
+playwright-report/
+test-results/
+
+# --- IDE / editor ---
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# --- OS ---
 .DS_Store
 Thumbs.db
 
-# Colab/Runtime
-.superpowers/
-*.log
-
-# Data/Cache
-*.csv
-*.parquet
-*.pkl
-.cache/
-
-# Runtime ChromaDB stores for the market-intelligence layer.
-# The seed corpus (data/market_intel_seed/) IS tracked; the live
-# vector store (data/market_intel/) is regenerated from seed and
-# should not be committed.
-data/market_intel/
-frontend/data/market_intel/
-
-# Secrets / agent config — NEVER commit any .env file
+# --- Secrets — NEVER commit .env files ---
 .env
 .env.*
 !.env.example
 *.env
 *.env.local
 
-# Local explanation/reference files (not synced to remote)
-SETUP.md
-SUMMARY.md
-raja_notes/
+# --- Logs / caches ---
+*.log
+.cache/
 
-# Test/debug artifacts
-.playwright-mcp/
-e2e-*-result.png
-vol-desk-platform-screenshot.png
-playwright-report/
-test-results/
+# --- Tabular data dumps ---
+*.csv
+*.parquet
+*.pkl
 
-# Claude Code local state
+# --- Runtime ChromaDB vector stores (seed corpus IS tracked) ---
+data/market_intel/
+frontend/data/market_intel/
+
+# --- Local agent / tooling state ---
 .claude/
+.superpowers/
+.stitch-project.json
+.design-argopilot-new/
+.playwright-mcp/
 
-# Research demo screenshots (not synced to remote)
-research/demo-*.png
+# --- Root-level screenshots / images (clutter) ---
+/*.png
 
-# Local-only docs (not synced to remote — keep README.md only)
+# --- Reports / one-off outputs ---
+reports/
+analysis_output.txt
+
+# --- Local notes / research / drafts ---
+raja_notes/
+research/
+docs/
+
+# --- Local-only docs (keep README.md + architecture.md only) ---
 CLAUDE.md
-architecture.md
+SETUP.md
 QUANTLIB_INTEGRATION.md
 SOLVER_COMPONENT.md
 README_structured_pricing.md
-docs/
+README_ESMM.md
+architecture_ESMM.md
+ESMM_LAB.md
+ARGOPILOT_STRUCTURING_EXTENSIONS.md
 
-# Local-only assets / WIP / one-offs
-.stitch-project.json
-.playwright-mcp/
+# --- Orphan / one-off files at repo root ---
 Knockout_Option_Pricer_SP500.ipynb
-analysis_output.txt
 ko_analysis.py
 test_solver.py
-argopilot-rebrand.png
-mobile-portrait.png
-rebrand-full.png
-reports/
 
-# CRITICAL: Prevent any cross-project contamination
-# Only files in THIS directory should be tracked
+# --- Default Vite scaffold README (not the project README) ---
+frontend/README.md
+
+# --- Safety: prevent any cross-project contamination ---
 ../
 ../.git/
 ../.gitignore

@@ -35,8 +35,18 @@ const PRODUCTS: Array<{
 ];
 
 async function waitForFormReady(page: Page) {
+  // Home is the quant-terminal landing. Click into Quick Pricer if the
+  // pricer form isn't already on screen.
+  const heading = page.getByRole("heading", { name: /Price Your Option/i });
+  const headingVisible = await heading.isVisible().catch(() => false);
+  if (!headingVisible) {
+    const pricerBtn = page.getByRole("button", { name: /Quick Pricer/i }).first();
+    if (await pricerBtn.isVisible().catch(() => false)) {
+      await pricerBtn.click();
+    }
+  }
   // The form auto-fetches market data — wait for spot to populate.
-  await expect(page.getByRole("heading", { name: /Price Your Option/i })).toBeVisible();
+  await expect(heading).toBeVisible();
   await page.waitForFunction(() => {
     const inputs = document.querySelectorAll<HTMLInputElement>("input[type=number]");
     for (const i of inputs) {

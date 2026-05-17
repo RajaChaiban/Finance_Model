@@ -4,14 +4,12 @@ import { ReportDisplay } from "./ReportDisplay";
 import { CopilotPanel } from "./CopilotPanel";
 import { EsmmLabPanel } from "./EsmmLabPanel";
 import { Header } from "./Header";
-import { IndexTickerStrip } from "./IndexTickerStrip";
-import { MoversGrid } from "./MoversGrid";
-import { BriefingPanel } from "./BriefingPanel";
+import { LandingHome } from "./LandingHome";
 import { ConfigFormState, PricingResult, DEFAULT_CONFIG } from "../types";
 import { apiClient } from "../api/client";
 import { useMarketMovers } from "../hooks/useMarketMovers";
 
-type Mode = "pricer" | "copilot" | "esmm";
+type Mode = "home" | "pricer" | "copilot" | "esmm";
 
 // Index tickers (^GSPC, ^IXIC, ...) aren't valid yfinance lookups for
 // dividend yield and aren't what gets traded — desks price index options
@@ -29,7 +27,7 @@ function resolveTicker(raw: string): string {
 }
 
 export function Dashboard() {
-  const [mode, setMode] = useState<Mode>("pricer");
+  const [mode, setMode] = useState<Mode>("home");
   const [result, setResult] = useState<PricingResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
@@ -133,63 +131,63 @@ export function Dashboard() {
     setActiveStep(1);
   };
 
+  if (mode === "home") {
+    return (
+      <div className="dashboard-onepage argo-shell">
+        <LandingHome
+          movers={movers.data}
+          moversLoading={movers.isLoading}
+          moversStale={movers.isStale}
+          onMoversRefresh={movers.refresh}
+          onPickWorkspace={setMode}
+          onPickTicker={handlePickTicker}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="dashboard-onepage">
       <Header asOf={movers.data?.as_of} source={movers.data?.source} />
 
-      <div className="vd-market-bar">
-        <div className="vd-market-bar-inner">
-          <IndexTickerStrip
-            indices={movers.data?.indices ?? []}
-            isLoading={movers.isLoading}
-            onPickTicker={handlePickTicker}
-          />
-        </div>
-      </div>
-
-      <BriefingPanel />
-
-      <MoversGrid
-        gainers={movers.data?.gainers ?? []}
-        losers={movers.data?.losers ?? []}
-        volatile={movers.data?.volatile ?? []}
-        isLoading={movers.isLoading}
-        isStale={movers.isStale}
-        onPickTicker={handlePickTicker}
-      />
-
-      <section className="hero-section vd-hero-condensed">
-        <div className="hero-content">
-          <h1 className="hero-title">Derivatives Pricing Dashboard</h1>
-          <p className="hero-subtitle">
-            Professional options pricing with real-time Greeks and risk analysis
-          </p>
-          <div className="hero-divider"></div>
-        </div>
-      </section>
-
-      <div className="main-content" ref={configRef}>
-        {/* Mode Switcher: Quick Pricer (existing) vs Structuring Co-pilot vs eSMM Lab */}
-        <div className="mode-switcher">
+      {/* Pipeline tabs pinned to the top of every non-home page.
+          News (ticker strip / briefing / movers) lives ONLY on the home page. */}
+      <div className="pipeline-tabs-bar">
+        <div className="pipeline-tabs-inner">
           <button
-            className={`mode-btn ${mode === "pricer" ? "active" : ""}`}
+            className="pipeline-tab pipeline-tab-home"
+            onClick={() => setMode("home")}
+            aria-label="Back to home"
+          >
+            <span className="pipeline-tab-home-icon" aria-hidden>←</span>
+            Home
+          </button>
+          <div className="pipeline-tab-divider" aria-hidden />
+          <button
+            className={`pipeline-tab ${mode === "pricer" ? "active" : ""}`}
             onClick={() => setMode("pricer")}
           >
+            <span className="pipeline-tab-icon" aria-hidden>📈</span>
             Quick Pricer
           </button>
           <button
-            className={`mode-btn ${mode === "copilot" ? "active" : ""}`}
+            className={`pipeline-tab ${mode === "copilot" ? "active" : ""}`}
             onClick={() => setMode("copilot")}
           >
+            <span className="pipeline-tab-icon" aria-hidden>🧠</span>
             Structuring Co-pilot
           </button>
           <button
-            className={`mode-btn ${mode === "esmm" ? "active" : ""}`}
+            className={`pipeline-tab ${mode === "esmm" ? "active" : ""}`}
             onClick={() => setMode("esmm")}
           >
+            <span className="pipeline-tab-icon" aria-hidden>⚡</span>
             eSMM Lab
           </button>
         </div>
+      </div>
+
+      <div className="main-content main-content-flush" ref={configRef}>
 
         {mode === "copilot" ? (
           <CopilotPanel />

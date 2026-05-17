@@ -17,12 +17,16 @@ test.describe("Co-pilot init — port consistency", () => {
   }) => {
     await page.goto("/");
 
+    // The new landing is a workspace selector — navigate into the pricer
+    // first so its auto-fetch of /api/market/spot-price fires (this is what
+    // anchors the host:port comparison below).
     const pricingReq = page.waitForRequest(
       (req) =>
         req.url().includes("/api/market/spot-price") &&
         req.method() === "GET",
       { timeout: 30_000 },
     );
+    await page.getByRole("button", { name: /Quick Pricer/i }).first().click();
 
     const pricingRequest = await pricingReq;
     const pricingUrl = new URL(pricingRequest.url());

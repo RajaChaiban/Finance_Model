@@ -1,4 +1,5 @@
 import './App.css'
+import './styles/argo-landing.css'
 import { Dashboard } from './components/Dashboard'
 
 function App() {
