@@ -70,8 +70,10 @@ def test_kernel_types_importable() -> None:
 
     cfg = KernelConfig(duration_sec=60.0)
     k = Kernel(cfg)
-    k.schedule(0.5, {"kind": "test"})
-    assert len(k._heap) == 1
+    # Phase-2 implementation: kernel exposes a participants registry
+    # and an internal pending-orders heap.
+    assert k.participants == []
+    assert k._pending == []
 
 
 def test_arena_types_importable() -> None:
