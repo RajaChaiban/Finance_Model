@@ -1,21 +1,234 @@
-# Curated stress scenarios. Populated in Phase 4.
+# Curated stress scenarios — six events a 20y trader actually fears.
 #
-# Each entry is a Scenario as defined in loader.Scenario:
-#   scenario_id:
-#     description: human-readable
-#     duration_sec: float
+# Each entry follows the Scenario schema in loader.py:
+#
+# scenarios:
+#   <id>:
+#     description: human-readable summary
+#     duration_sec: total run length
 #     regime_label: CALM | TRENDING | VOLATILE | STRESS
+#     starting_mid: float (anchors the synthetic price path)
+#     starting_spread_bps: float (initial book width)
 #     participants:
-#       - kind: noise|informed|momentum|mean_reverter|news_shock|replay_taker
-#         weight: 0.0-1.0
-#         params: {...}
+#       - kind: noise | informed | momentum | mean_reverter | news_shock | replay_taker
+#         weight: 0.0-1.0 (relative flow share)
+#         params: {...}  (archetype-specific knobs)
 #     events:
-#       - ts_offset_sec: float
-#         kind: gap|halt|vol_spike|news_print
+#       - ts_offset_sec: float (from t=0)
+#         kind: gap | halt | vol_spike | news_print | spread_widen
 #         params: {...}
-#
-# Initial planned entries (phase 4):
-#   flash_crash_2010, covid_mar_2020, hot_cpi, fomc_surprise,
-#   opex_pin, liquidity_drought
+#     latency_overrides:           # optional, overrides default LatencyConfig
+#       submit_mean_ms: float
+#       submit_sigma_ms: float
+#       cancel_mean_ms: float
+#       cancel_sigma_ms: float
 
-scenarios: {}
+scenarios:
+
+  # ------------------------------------------------------------------
+  # 2010 Flash Crash. 5/6/2010, ~14:42-14:47 ET. SPY -9% in 5 min then
+  # mostly recovers. Stub liquidity, quote-stuffing, evaporating depth.
+  # The MM lesson: a strategy that worked all morning blew up in 5 min.
+  # ------------------------------------------------------------------
+  flash_crash_2010:
+    description: "May 2010 flash crash. Stub-quote liquidity, depth collapse."
+    duration_sec: 1800.0   # 30 min window
+    regime_label: STRESS
+    starting_mid: 1130.0
+    starting_spread_bps: 4.0
+    participants:
+      - kind: noise
+        weight: 0.30      # noise pulls back during the crash
+        params: {arrival_rate_hz: 2.0, lot_min: 100, lot_max: 500}
+      - kind: informed
+        weight: 0.40      # informed gets aggressive
+        params: {edge_threshold_bps: 8.0, lookahead_ms: 300, lot: 500}
+      - kind: momentum
+        weight: 0.25
+        params: {ema_short_sec: 5, ema_long_sec: 30, threshold_pct: 0.10, lot: 1000}
+      - kind: mean_reverter
+        weight: 0.05      # mean-rev is largely absent (institutional)
+        params: {zscore_threshold: 3.0, window_sec: 60, lot: 200}
+    events:
+      - ts_offset_sec: 60.0
+        kind: spread_widen
+        params: {multiplier: 3.0, duration_sec: 30}
+      - ts_offset_sec: 90.0
+        kind: vol_spike
+        params: {vol_annual_after: 2.0, duration_sec: 300}
+      - ts_offset_sec: 95.0
+        kind: gap
+        params: {pct_move: -0.06, jump_sec: 5}   # 6% in 5 seconds
+      - ts_offset_sec: 600.0
+        kind: vol_spike
+        params: {vol_annual_after: 0.6, duration_sec: 600}   # cooling
+    latency_overrides:
+      submit_mean_ms: 35.0   # exchange congestion
+      submit_sigma_ms: 25.0
+      cancel_mean_ms: 30.0
+      cancel_sigma_ms: 20.0
+
+  # ------------------------------------------------------------------
+  # COVID rout, week of 3/9-3/13 2020. Multi-day vol >80, repeated
+  # circuit breakers, asymmetric flow (massive sell-side pressure).
+  # MM lesson: standard inventory bands don't hedge fast enough.
+  # ------------------------------------------------------------------
+  covid_mar_2020:
+    description: "March 2020 COVID rout. Sustained vol >80, circuit breakers."
+    duration_sec: 3600.0
+    regime_label: STRESS
+    starting_mid: 280.0   # SPY level
+    starting_spread_bps: 8.0
+    participants:
+      - kind: noise
+        weight: 0.10
+        params: {arrival_rate_hz: 1.5, lot_min: 100, lot_max: 300}
+      - kind: informed
+        weight: 0.50
+        params: {edge_threshold_bps: 5.0, lookahead_ms: 500, lot: 800, bias: -1.0}
+      - kind: momentum
+        weight: 0.35
+        params: {ema_short_sec: 10, ema_long_sec: 60, threshold_pct: 0.20, lot: 1500}
+      - kind: mean_reverter
+        weight: 0.05
+        params: {zscore_threshold: 4.0, window_sec: 120, lot: 100}
+    events:
+      - ts_offset_sec: 0.0
+        kind: vol_spike
+        params: {vol_annual_after: 0.9, duration_sec: 3600}
+      - ts_offset_sec: 900.0
+        kind: halt
+        params: {duration_sec: 30}   # circuit-breaker simulated halt
+      - ts_offset_sec: 1800.0
+        kind: gap
+        params: {pct_move: -0.04, jump_sec: 60}
+    latency_overrides:
+      submit_mean_ms: 25.0
+      submit_sigma_ms: 18.0
+      cancel_mean_ms: 22.0
+      cancel_sigma_ms: 15.0
+
+  # ------------------------------------------------------------------
+  # Surprise hot CPI print. e.g. Sept 2022. Rates rally violently,
+  # growth-stock factor tanks. MM lesson: vol regime shifts at 8:30 ET
+  # and you have ~10 seconds to widen spreads or get picked off.
+  # ------------------------------------------------------------------
+  hot_cpi:
+    description: "Surprise hot CPI print. 8:30 ET event, instant vol regime shift."
+    duration_sec: 900.0
+    regime_label: VOLATILE
+    starting_mid: 400.0
+    starting_spread_bps: 3.0
+    participants:
+      - kind: noise
+        weight: 0.50
+        params: {arrival_rate_hz: 3.0, lot_min: 100, lot_max: 200}
+      - kind: informed
+        weight: 0.25
+        params: {edge_threshold_bps: 6.0, lookahead_ms: 400, lot: 500}
+      - kind: momentum
+        weight: 0.20
+        params: {ema_short_sec: 10, ema_long_sec: 60, threshold_pct: 0.08, lot: 800}
+      - kind: mean_reverter
+        weight: 0.05
+        params: {zscore_threshold: 3.0, window_sec: 60, lot: 200}
+    events:
+      - ts_offset_sec: 60.0
+        kind: news_print
+        params: {pct_move: -0.015, jump_sec: 2}   # instant gap on print
+      - ts_offset_sec: 60.0
+        kind: vol_spike
+        params: {vol_annual_after: 0.45, duration_sec: 600}
+      - ts_offset_sec: 60.0
+        kind: spread_widen
+        params: {multiplier: 2.5, duration_sec: 120}
+
+  # ------------------------------------------------------------------
+  # FOMC surprise hawkish hold. 14:00 ET event. Initial chop then
+  # trend on Powell's tone. MM lesson: hedge bands must adapt to the
+  # new regime within minutes.
+  # ------------------------------------------------------------------
+  fomc_surprise:
+    description: "FOMC surprise hawkish hold. Initial gap then trending phase."
+    duration_sec: 1200.0
+    regime_label: TRENDING
+    starting_mid: 500.0
+    starting_spread_bps: 3.0
+    participants:
+      - kind: noise
+        weight: 0.40
+        params: {arrival_rate_hz: 2.5, lot_min: 100, lot_max: 300}
+      - kind: informed
+        weight: 0.20
+        params: {edge_threshold_bps: 5.0, lookahead_ms: 600, lot: 400}
+      - kind: momentum
+        weight: 0.30
+        params: {ema_short_sec: 30, ema_long_sec: 180, threshold_pct: 0.06, lot: 600}
+      - kind: mean_reverter
+        weight: 0.10
+        params: {zscore_threshold: 2.5, window_sec: 90, lot: 200}
+    events:
+      - ts_offset_sec: 120.0
+        kind: news_print
+        params: {pct_move: -0.008, jump_sec: 1}
+      - ts_offset_sec: 130.0
+        kind: vol_spike
+        params: {vol_annual_after: 0.30, duration_sec: 300}
+      - ts_offset_sec: 300.0
+        kind: gap
+        params: {pct_move: -0.012, jump_sec: 180}   # slow trend down
+
+  # ------------------------------------------------------------------
+  # Monthly options expiration. Third Friday. Mean-reverting flow
+  # dominates around large open-interest strikes ("pinning"). Low
+  # realised vol but high gamma exposure for option books.
+  # ------------------------------------------------------------------
+  opex_pin:
+    description: "Opex Friday. Mean-reversion around strikes, pinning."
+    duration_sec: 3600.0
+    regime_label: CALM
+    starting_mid: 450.0
+    starting_spread_bps: 2.5
+    participants:
+      - kind: noise
+        weight: 0.40
+        params: {arrival_rate_hz: 3.0, lot_min: 100, lot_max: 300}
+      - kind: informed
+        weight: 0.10
+        params: {edge_threshold_bps: 4.0, lookahead_ms: 800, lot: 300}
+      - kind: momentum
+        weight: 0.10
+        params: {ema_short_sec: 60, ema_long_sec: 300, threshold_pct: 0.04, lot: 300}
+      - kind: mean_reverter
+        weight: 0.40
+        params:
+          zscore_threshold: 1.5
+          window_sec: 60
+          lot: 500
+          pin_strike: 450.0   # this is the magnet level
+          pin_strength_bps: 8.0
+
+  # ------------------------------------------------------------------
+  # Holiday-eve afternoon (e.g., the Wednesday before Thanksgiving).
+  # Low everything. The few aggressors that show up are disproportionately
+  # informed because uninformed flow took the afternoon off.
+  # ------------------------------------------------------------------
+  liquidity_drought:
+    description: "Holiday-eve afternoon. Low volume, elevated adv-selection."
+    duration_sec: 5400.0
+    regime_label: CALM
+    starting_mid: 460.0
+    starting_spread_bps: 6.0
+    participants:
+      - kind: noise
+        weight: 0.50
+        params: {arrival_rate_hz: 0.5, lot_min: 100, lot_max: 200}
+      - kind: informed
+        weight: 0.40
+        params: {edge_threshold_bps: 7.0, lookahead_ms: 500, lot: 200}
+      - kind: momentum
+        weight: 0.05
+        params: {ema_short_sec: 120, ema_long_sec: 600, threshold_pct: 0.03, lot: 200}
+      - kind: mean_reverter
+        weight: 0.05
+        params: {zscore_threshold: 2.0, window_sec: 180, lot: 100}
