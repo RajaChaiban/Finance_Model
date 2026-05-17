@@ -28,6 +28,7 @@ from src.esmm import (
     persistence,
     quote_engine,
     schemas,
+    sim,
     synthetic,
     tca,
 )
@@ -43,6 +44,7 @@ __all__ = [
     "persistence",
     "quote_engine",
     "schemas",
+    "sim",
     "synthetic",
     "tca",
 ]
