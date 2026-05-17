@@ -1,7 +1,8 @@
 """Tests for the phase-2 participant archetypes.
 
-Currently covers :class:`~src.esmm.sim.participants.noise.NoiseTrader`.
-Subsequent commits add InformedTrader and ReplayTaker coverage.
+Covers :class:`~src.esmm.sim.participants.noise.NoiseTrader` and
+:class:`~src.esmm.sim.participants.informed.InformedTrader`. A subsequent
+commit adds ReplayTaker coverage.
 
 These participants are pure objects — no kernel wiring — so the tests
 exercise them by hand-feeding snapshots and timestamps. Stochastic
@@ -12,12 +13,14 @@ a fixed seed) so the suite stays stable under CI.
 from __future__ import annotations
 
 import math
+from typing import Callable
 
 import pytest
 
 from src.esmm.schemas import OrderBookLevel, OrderBookSnapshot
 from src.esmm.sim.lob import Order, OrderSide, OrderType
 from src.esmm.sim.participants.base import Participant
+from src.esmm.sim.participants.informed import InformedTrader
 from src.esmm.sim.participants.noise import NoiseTrader
 
 
@@ -67,6 +70,11 @@ def _half_snap(
 def test_noise_trader_is_a_participant() -> None:
     nt = NoiseTrader("noise1", "SPY", seed=0)
     assert isinstance(nt, Participant)
+
+
+def test_informed_trader_is_a_participant() -> None:
+    it = InformedTrader("inf1", "SPY", future_mid_provider=lambda t: 100.0, seed=0)
+    assert isinstance(it, Participant)
 
 
 # =====================================================================
@@ -218,3 +226,152 @@ def test_noise_trader_orders_are_well_formed() -> None:
             assert math.isnan(o.price)
         else:
             assert math.isfinite(o.price)
+
+
+# =====================================================================
+# InformedTrader
+# =====================================================================
+def _const_future(price: float) -> Callable[[float], float]:
+    return lambda _t: price
+
+
+def test_informed_trader_buys_when_future_above_current() -> None:
+    """Large positive edge → MARKET BUY of size ``lot``."""
+    it = InformedTrader(
+        "inf",
+        "SPY",
+        future_mid_provider=_const_future(101.0),  # +100 bps vs 100.0
+        edge_threshold_bps=5.0,
+        lot=500,
+        signal_noise_bps=0.0,
+        seed=1,
+    )
+    it.on_book(_snap(ts=0.0, bid=99.95, ask=100.05))
+    orders = it.decide(0.1)
+    assert len(orders) == 1
+    o = orders[0]
+    assert o.side == OrderSide.BUY
+    assert o.order_type == OrderType.MARKET
+    assert o.size == 500
+    assert math.isnan(o.price)
+    assert o.owner_id == "inf"
+    assert o.order_id == 0
+
+
+def test_informed_trader_sells_when_future_below_current() -> None:
+    """Large negative edge → MARKET SELL."""
+    it = InformedTrader(
+        "inf",
+        "SPY",
+        future_mid_provider=_const_future(99.0),  # -100 bps vs 100.0
+        edge_threshold_bps=5.0,
+        lot=500,
+        signal_noise_bps=0.0,
+    )
+    it.on_book(_snap(ts=0.0, bid=99.95, ask=100.05))
+    orders = it.decide(0.1)
+    assert len(orders) == 1
+    assert orders[0].side == OrderSide.SELL
+    assert orders[0].order_type == OrderType.MARKET
+
+
+def test_informed_trader_silent_when_edge_below_threshold() -> None:
+    """Within threshold → no order."""
+    # mid=100.0, future=100.02 → edge=2bps; threshold=5bps → silent.
+    it = InformedTrader(
+        "inf",
+        "SPY",
+        future_mid_provider=_const_future(100.02),
+        edge_threshold_bps=5.0,
+        signal_noise_bps=0.0,
+    )
+    it.on_book(_snap(ts=0.0, bid=99.95, ask=100.05))
+    assert it.decide(0.1) == []
+
+
+def test_informed_trader_perfect_predictor_with_zero_noise() -> None:
+    """signal_noise=0 → exact sign of edge drives the decision."""
+    it_buy = InformedTrader(
+        "i1",
+        "SPY",
+        future_mid_provider=_const_future(100.0 * (1 + 5.1e-4)),
+        edge_threshold_bps=5.0,
+        signal_noise_bps=0.0,
+    )
+    it_buy.on_book(_snap(ts=0.0, bid=99.95, ask=100.05))
+    assert len(it_buy.decide(0.1)) == 1
+
+    it_silent = InformedTrader(
+        "i2",
+        "SPY",
+        future_mid_provider=_const_future(100.0 * (1 + 4.9e-4)),
+        edge_threshold_bps=5.0,
+        signal_noise_bps=0.0,
+    )
+    it_silent.on_book(_snap(ts=0.0, bid=99.95, ask=100.05))
+    assert it_silent.decide(0.1) == []
+
+
+def test_informed_trader_no_orders_when_mid_is_none() -> None:
+    """Half-empty book → no orders."""
+    it = InformedTrader(
+        "inf",
+        "SPY",
+        future_mid_provider=_const_future(120.0),  # huge edge if it had a mid
+        edge_threshold_bps=5.0,
+        signal_noise_bps=0.0,
+    )
+    it.on_book(_half_snap(side="bid"))
+    assert it.decide(0.1) == []
+    it.on_book(_half_snap(side="ask"))
+    assert it.decide(0.2) == []
+
+
+def test_informed_trader_determinism_under_seed() -> None:
+    """Same seed + same signal stream → identical orders."""
+    def fut(_t: float) -> float:
+        return 100.05  # 5 bps edge: right at threshold → noise decides
+
+    a = InformedTrader(
+        "a",
+        "SPY",
+        future_mid_provider=fut,
+        edge_threshold_bps=5.0,
+        signal_noise_bps=3.0,
+        seed=99,
+    )
+    b = InformedTrader(
+        "b",
+        "SPY",
+        future_mid_provider=fut,
+        edge_threshold_bps=5.0,
+        signal_noise_bps=3.0,
+        seed=99,
+    )
+    out_a: list[Order] = []
+    out_b: list[Order] = []
+    for i in range(50):
+        ts = (i + 1) * 0.1
+        a.on_book(_snap(ts=ts, bid=99.95, ask=100.05))
+        b.on_book(_snap(ts=ts, bid=99.95, ask=100.05))
+        out_a.extend(a.decide(ts))
+        out_b.extend(b.decide(ts))
+    assert len(out_a) == len(out_b)
+    for oa, ob in zip(out_a, out_b):
+        assert oa.side == ob.side
+        assert oa.size == ob.size
+
+
+def test_informed_trader_rejects_bad_config() -> None:
+    with pytest.raises(ValueError):
+        InformedTrader("x", "SPY", future_mid_provider=lambda t: 100.0, lookahead_sec=-1)
+    with pytest.raises(ValueError):
+        InformedTrader(
+            "x", "SPY", future_mid_provider=lambda t: 100.0, edge_threshold_bps=-1
+        )
+    with pytest.raises(ValueError):
+        InformedTrader("x", "SPY", future_mid_provider=lambda t: 100.0, lot=0)
+    with pytest.raises(ValueError):
+        InformedTrader(
+            "x", "SPY", future_mid_provider=lambda t: 100.0, signal_noise_bps=-1.0
+        )
