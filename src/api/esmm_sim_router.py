@@ -384,12 +384,12 @@ def run_arena(req: ArenaRequest) -> ArenaResponse:
 
     strategy_factories = {}
     for entry in req.strategies:
-        # Captured per-iter to avoid late-binding issues.
-        def _make(_kc, _spec=entry.participant):
-            # Stamp the strategy_id as the participant_id so downstream
-            # bookkeeping is consistent.
+        # Capture BOTH spec and strategy_id as default args. Closing
+        # over `entry` would late-bind to the last loop value and every
+        # strategy would end up with the same id.
+        def _make(_kc, _spec=entry.participant, _sid=entry.strategy_id):
             params = dict(_spec.params)
-            params["participant_id"] = entry.strategy_id
+            params["participant_id"] = _sid
             return _build_participant(
                 ParticipantSpecBody(kind=_spec.kind, weight=_spec.weight, params=params)
             )
